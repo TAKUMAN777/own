@@ -2,6 +2,7 @@
 // このアプリはオーナー自身のもの。オーナーのアカウントに、複数の管理会社（各社の REVO管理）がつながる。
 // 本番では、管理会社ごとのデータ取得を各社の REVO管理 API の呼び出しに置き換える（docs/API.md）。
 import * as seed from './seed.mjs';
+import * as ins from './insights.mjs';
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 
@@ -38,7 +39,7 @@ export function createStore() {
 
   // ---------- 資産（建物）----------
   // 3つの作り方：管理システムと連携（link）／管理会社の資料から（import）／自主管理で入力（self）
-  const FIN_KEYS = ['price', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance'];
+  const FIN_KEYS = ['price', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance', 'capRate', 'appraisal'];
   const STATUSES = ['入居中', '空室'];
   const str = (v, max = 60) => String(v ?? '').trim().slice(0, max);
   const int = (v) => { const n = Math.round(Number(String(v ?? '').replace(/[,円¥\s]/g, ''))); return Number.isFinite(n) && n >= 0 ? n : 0; };
@@ -46,7 +47,7 @@ export function createStore() {
 
   function cleanFinance(f = {}) {
     const out = {};
-    for (const k of FIN_KEYS) out[k] = k === 'loanRate' ? Math.max(0, Math.min(30, Number(f[k]) || 0)) : int(f[k]);
+    for (const k of FIN_KEYS) out[k] = k === 'loanRate' || k === 'capRate' ? Math.max(0, Math.min(30, Number(f[k]) || 0)) : int(f[k]);
     out.acquired = ymOk(f.acquired) ? f.acquired : '';
     return out;
   }
@@ -106,7 +107,7 @@ export function createStore() {
         const pl = seed.buildPL(l.ownerId, m).buildings.find((x) => x.buildingId === b.id);
         const rooms = seed.units.filter((u) => u.buildingId === b.id).map((u) => {
           const st = pl.rooms.find((r) => r.no === u.no).status;
-          return { no: u.no, layout: '', rent: u.rent, fee: u.fee, status: st === '空室' ? '空室' : '入居中' };
+          return { no: u.no, layout: '', rent: u.rent, fee: u.fee, status: st === '空室' ? '空室' : '入居中', ...ins.roomLife(b.id, u.no, b.built, u.vacantFrom) };
         });
         // 年間の運営費（見込み）：締め済みの月の管理料＋費用の平均 × 12
         const months = seed.closed.map((cm) => seed.buildPL(l.ownerId, cm).buildings.find((x) => x.buildingId === b.id));
@@ -130,7 +131,61 @@ export function createStore() {
   }
   function allAssets(accountId) {
     const a = account(accountId);
-    return [...linkAssets(a), ...a.assets.map((as) => ownAssetView(a, as))];
+    return [...linkAssets(a), ...a.assets.map((as) => ownAssetView(a, as))].map((x) => ({ ...x, value: ins.valuation(x) }));
+  }
+
+  // ---------- タイムライン（過去・現在・未来）----------
+  function monthlyOf(a, x) {
+    if (x.source === 'link') {
+      const l = a.links.find((v) => v.tenantId === x.tenantId);
+      return seed.closed.map((m) => { const b = seed.buildPL(l.ownerId, m).buildings.find((v) => v.buildingId === x.buildingId); return { month: m, income: b.received, expense: b.fee + b.expense, net: b.remit }; });
+    }
+    const ledger = a.ledger.filter((e) => e.assetId === x.id);
+    return [...new Set(ledger.map((e) => e.month))].sort().map((m) => {
+      const es = ledger.filter((e) => e.month === m);
+      const income = es.filter((e) => e.type === 'income').reduce((t, e) => t + e.amount, 0);
+      const expense = es.filter((e) => e.type === 'expense').reduce((t, e) => t + e.amount, 0);
+      return { month: m, income, expense, net: income - expense };
+    });
+  }
+  function timelineOf(a, x) {
+    const E = [];
+    const base = { assetId: x.id, assetName: x.name };
+    const push = (at, kind, icon, title, extra = {}) => { if (at && /^\d{4}-\d{2}$/.test(at)) E.push({ ...base, ...ins.ev(at, kind, icon, title, extra) }); };
+    const f = x.finance;
+    push(x.built, 'build', '🏗️', '竣工');
+    if (x.built && ins.LIFE[x.structure]) push(ins.addMonths(x.built, ins.LIFE[x.structure] * 12), 'life', '⏳', `法定耐用年数（${x.structure}造 ${ins.LIFE[x.structure]}年）に到達`);
+    push(f.acquired, 'acquire', '🔑', '取得', { amount: f.price || null });
+    for (const m of monthlyOf(a, x)) push(m.month, 'money', '💴', '月の収支', { amount: m.net, detail: `収入 ${m.income.toLocaleString()}円／支出 ${m.expense.toLocaleString()}円` });
+    for (const r of x.rooms) {
+      if (r.since) push(r.since, 'room', '🏠', `${r.no}号室 入居`, { room: r.no });
+      if (r.moveOut) push(r.moveOut, 'room', '🚪', `${r.no}号室 退去`, { room: r.no });
+      if (r.leaseEnd) push(r.leaseEnd, 'room', '📝', `${r.no}号室 契約の更新`, { room: r.no });
+    }
+    if (x.source === 'link') {
+      const l = a.links.find((v) => v.tenantId === x.tenantId);
+      for (const m of db.mgmt.filter((v) => v.ownerId === l.ownerId)) {
+        push(m.start.slice(0, 7), 'contract', '🤝', `${x.company}に管理を委託`);
+        push(m.end.slice(0, 7), 'contract', '📑', `${x.company}との管理委託契約の満了`);
+      }
+      for (const o of db.orders.filter((v) => v.buildingId === x.buildingId)) {
+        const room = (o.title.match(/(\S+?)号室/) || [])[1] || '';
+        for (const h of o.history) push(h.at.slice(0, 7), 'work', '🛠️', `${o.title}：${h.status}`, { amount: h.status === '発注済' ? o.amount : null, room });
+      }
+      for (const p of db.proposals.filter((v) => v.buildingId === x.buildingId && v.status !== 'draft' && v.status !== 'superseded')) {
+        const room = (p.title.match(/(\S+?)号室/) || [])[1] || '';
+        push(p.sentAt.slice(0, 7), 'proposal', '📨', `ご提案：${p.title}`, { room });
+        if (p.response) push(p.response.at.slice(0, 7), 'proposal', '✅', `ご回答（${{ approve: '承認', conditional: '条件付きで承認', return: '差戻し' }[p.response.decision]}）：${p.title}`, { room });
+      }
+    } else {
+      for (const e of a.ledger.filter((v) => v.assetId === x.id && v.room)) push(e.month, 'money', e.type === 'income' ? '💴' : '🧾', `${e.room} ${e.category}`, { amount: e.type === 'income' ? e.amount : -e.amount, room: e.room });
+    }
+    const loan = ins.loanPlan(f);
+    if (loan.payoff) push(loan.payoff, 'loan', '🎉', 'ローン完済（見込み）');
+    for (const r of ins.repairPlan(x)) push(r.month, 'repair', '🔧', `${r.name}（目安）`, { amount: -r.cost });
+    push(ins.NOW, 'now', '📍', 'いま', { detail: `入居 ${x.kpi.occupied}/${x.kpi.units}室・資産価値 ${Math.round(x.value.value / 10000).toLocaleString()}万円` });
+    const order = ['build', 'acquire', 'contract', 'now', 'money', 'proposal', 'work', 'room', 'repair', 'loan', 'life'];
+    return E.sort((p, q) => p.at.localeCompare(q.at) || order.indexOf(p.kind) - order.indexOf(q.kind));
   }
   function findOwn(a, id) {
     const as = a.assets.find((x) => x.id === id);
@@ -410,6 +465,7 @@ export function createStore() {
           fullYear: sum((x) => x.kpi.fullYear), curYear: sum((x) => x.kpi.curYear),
           units, occupied: sum((x) => x.kpi.occupied), occRate: units ? sum((x) => x.kpi.occupied) / units : 0,
           // 利回りは取得価格が入っている資産だけで出す
+          value: sum((x) => x.value.value), equity: sum((x) => x.value.equity),
           grossYield: (() => { const w = list.filter((x) => x.finance.price); const p = w.reduce((s, x) => s + x.finance.price, 0); return p ? w.reduce((s, x) => s + x.kpi.fullYear, 0) / p : null; })(),
           missingPrice: list.filter((x) => !x.finance.price).length,
         },
@@ -432,7 +488,25 @@ export function createStore() {
           const expense = es.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
           return { month: m, income, expense, net: income - expense };
         });
-      return { ...x, ledger, works, monthly };
+      return { ...x, ledger, works, monthly, loan: ins.loanPlan(x.finance), repairs: ins.repairPlan(x), projection: ins.projection(x), timeline: timelineOf(a, x), now: ins.NOW };
+    },
+
+    room(accountId, id, no) {
+      const a = account(accountId);
+      const x = allAssets(accountId).find((v) => v.id === id);
+      if (!x) throw new HttpError(404, 'not_found', '資産が見つかりません');
+      const r = x.rooms.find((v) => v.no === no);
+      if (!r) throw new HttpError(404, 'not_found', '部屋が見つかりません');
+      return { asset: { id: x.id, name: x.name, source: x.source, company: x.company, system: x.system }, room: r, timeline: timelineOf(a, x).filter((e) => e.room === no), now: ins.NOW };
+    },
+
+    // すべての資産のタイムライン
+    timeline(accountId) {
+      const a = account(accountId);
+      const list = allAssets(accountId);
+      const all = list.flatMap((x) => timelineOf(a, x).filter((e) => e.kind !== 'now'));
+      all.push({ ...ins.ev(ins.NOW, 'now', '📍', 'いま'), assetId: null, assetName: '' });
+      return { now: ins.NOW, events: all.sort((p, q) => p.at.localeCompare(q.at)) };
     },
 
     createAsset(accountId, body) {

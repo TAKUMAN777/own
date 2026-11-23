@@ -42,6 +42,13 @@
 | `DELETE /assets/{id}` | 自分で作った資産だけ削除できる |
 | `POST /assets/{id}/ledger` | `{ month, type: income｜expense, category, amount }` または `{ source: 'import', entries: [...] }`（1行でも不正なら全部取り込まない） |
 | `DELETE /assets/{id}/ledger/{entryId}` | 記録を削除 |
+| `GET /assets/{id}/rooms/{no}` | 部屋1つと、その部屋のタイムライン |
+| `GET /timeline` | すべての資産のタイムライン `{ now, events }` |
+
+資産には `value`（資産価値）が付く：`{ value, method: income｜appraisal, capRate, noi, estimated, equity, gain }`。
+資産1件には、さらに `loan`（完済見込み）、`repairs`（修繕の目安）、`projection`（10年の見通し）、`timeline` が付く。
+タイムラインの1件：`{ at: 'YYYY-MM', when: past｜now｜future, kind, icon, title, detail?, amount?, room?, assetId, assetName }`。
+前提（想定の利回り・法定耐用年数・修繕の周期・家賃の下落）は `server/insights.mjs` にまとめている。
 
 ### 資産の作り方
 | source | 作り方 | 建物・部屋・収支 | 取得価格・借入・税・保険 |

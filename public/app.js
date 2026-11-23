@@ -396,28 +396,99 @@ const srcBadge = (x) => (x.source === 'link' ? `<span class="src link">🔗 ${es
   : x.source === 'import' ? `<span class="src import">📄 ${esc(x.company || '管理会社')}の資料から</span>`
     : '<span class="src self">✍️ 自主管理</span>');
 
-async function viewAssets() {
+// タイムライン（過去・現在・未来）の表示
+function tlHTML(events, { showAsset = false, roomLinks = true } = {}) {
+  if (!events.length) return '<div class="card muted">ありません</div>';
+  const byYear = {};
+  for (const e of events) (byYear[e.at.slice(0, 4)] ||= []).push(e);
+  return Object.entries(byYear).map(([y, es]) => `
+    <div class="tl-year">${y}年</div>
+    <ol class="tl">${es.map((e) => `<li class="tl-${e.when}${e.kind === 'now' ? ' tl-nowmark' : ''}">
+      <span class="tl-dot">${e.icon}</span>
+      <div class="tl-body">
+        <div class="row"><span><span class="tl-m">${Number(e.at.slice(5))}月</span> <b>${esc(e.title)}</b></span>${e.amount != null ? `<span class="num ${e.amount < 0 ? 'neg' : ''}">${e.amount < 0 ? '−' : ''}${yen(Math.abs(e.amount))}</span>` : ''}</div>
+        ${e.detail ? `<div class="small muted">${esc(e.detail)}</div>` : ''}
+        ${showAsset && e.assetId ? `<a class="small" href="#/assets/${enc(e.assetId)}">${esc(e.assetName)}</a>` : ''}
+        ${!showAsset && roomLinks && e.room ? `<a class="small" href="#/assets/${enc(e.assetId)}/rooms/${enc(e.room)}">${esc(e.room)}号室 ›</a>` : ''}
+      </div></li>`).join('')}</ol>`).join('');
+}
+
+const TL_FILTERS = [
+  ['all', 'すべて', null], ['money', '💴 お金', ['money', 'acquire', 'loan']], ['work', '🔧 工事・修繕', ['work', 'repair', 'proposal']],
+  ['room', '🏠 部屋', ['room']], ['building', '🏢 建物・契約', ['build', 'life', 'contract', 'acquire', 'loan']],
+];
+const ASSET_VIEWS = [['', '建物ごと'], ['by-company', '管理会社ごと'], ['by-type', '管理方法'], ['timeline', 'タイムライン']];
+const assetCard = (x) => `<a class="card" href="#/assets/${enc(x.id)}">
+  <div class="row"><strong>${esc(x.name)}</strong><span class="small num">${x.kpi.occupied}/${x.kpi.units}室</span></div>
+  <div>${srcBadge(x)}</div>
+  <div class="small muted">${esc(x.address)}</div>
+  <div class="row small"><span>資産価値 <b>${man(x.value.value)}</b>${x.value.method === 'appraisal' ? '（査定）' : ''}</span><span>表面 ${pct(x.kpi.grossYield)}</span></div>
+</a>`;
+const companyOf = (x) => (x.source === 'link' ? x.company : x.source === 'import' ? (x.company || '管理会社（資料）') : '自主管理');
+
+async function viewAssets(view = '') {
   const { summary: s, list } = await api('/assets');
+  const seg = `<div class="seg seg4">${ASSET_VIEWS.map(([k, t]) => `<a href="#/assets${k ? `/${k}` : ''}" class="${k === view ? 'on' : ''}">${t}</a>`).join('')}</div>`;
+  const group = (keyOf, labelOf) => {
+    const g = new Map();
+    for (const x of list) { const k = keyOf(x); if (!g.has(k)) g.set(k, []); g.get(k).push(x); }
+    return [...g.entries()].map(([k, xs]) => {
+      const sum = (f) => xs.reduce((t, x) => t + f(x), 0);
+      return `<h2>${labelOf(k, xs)}</h2>
+        <div class="card sub-total"><div class="kpis">
+          <div class="kpi"><div class="kk">建物</div><div class="kv2">${xs.length}<small>件</small></div></div>
+          <div class="kpi"><div class="kk">資産価値</div><div class="kv2">${man(sum((x) => x.value.value))}</div></div>
+          <div class="kpi"><div class="kk">入居</div><div class="kv2">${sum((x) => x.kpi.occupied)}/${sum((x) => x.kpi.units)}</div></div>
+          <div class="kpi"><div class="kk">いまの年間賃料</div><div class="kv2">${man(sum((x) => x.kpi.curYear))}</div></div>
+        </div></div>
+        ${xs.map(assetCard).join('')}`;
+    }).join('');
+  };
+  let body;
+  let afterRender = () => {};
+  if (view === 'timeline') {
+    const t = await api('/timeline');
+    const past = t.events.filter((e) => e.when === 'past' && e.at >= `${Number(t.now.slice(0, 4)) - 1}-01`);
+    const future = t.events.filter((e) => e.when !== 'past');
+    body = `
+      <p class="small muted">すべての建物の出来事を、時間の順に並べています。過去は去年から、未来は10年先まで。</p>
+      <div class="chipf" id="tlf">${TL_FILTERS.map(([k, t], i) => `<button type="button" data-k="${k}" class="${i ? '' : 'on'}">${t}</button>`).join('')}</div>
+      <div id="tlbody"></div>`;
+    afterRender = () => {
+      const draw = (k) => {
+        const kinds = TL_FILTERS.find((f) => f[0] === k)[2];
+        const pick = (es) => es.filter((e) => e.kind === 'now' || !kinds || kinds.includes(e.kind));
+        document.getElementById('tlbody').innerHTML = `<h2>⏪ 過去</h2>${tlHTML(pick(past), { showAsset: true })}${tlHTML(pick(future), { showAsset: true })}`;
+      };
+      document.querySelectorAll('#tlf button').forEach((b) => {
+        b.onclick = () => { document.querySelectorAll('#tlf button').forEach((c) => c.classList.toggle('on', c === b)); draw(b.dataset.k); };
+      });
+      draw('all');
+    };
+  } else if (view === 'by-company') {
+    body = group(companyOf, (k, xs) => `${xs[0].source === 'self' ? '✍️' : xs[0].source === 'import' ? '📄' : '🔗'} ${esc(k)}${xs[0].source === 'link' ? ` <span class="muted small">${esc(xs[0].system)}</span>` : ''}`);
+  } else if (view === 'by-type') {
+    body = group((x) => (x.source === 'self' ? 'self' : 'company'), (k) => (k === 'self' ? '✍️ 自主管理' : '🏢 管理会社に委託'));
+  } else {
+    body = list.map(assetCard).join('');
+  }
   $app.innerHTML = `
     <h1>🏢 資産</h1>
     <div class="card">
       <div class="kpis">
-        <div class="kpi"><div class="kk">資産</div><div class="kv2">${s.count}<small>件</small></div></div>
-        <div class="kpi"><div class="kk">取得額の合計</div><div class="kv2">${man(s.price)}</div></div>
+        <div class="kpi hl"><div class="kk">資産価値（推定）</div><div class="kv2">${man(s.value)}</div></div>
+        <div class="kpi hl"><div class="kk">純資産（価値−借入）</div><div class="kv2">${man(s.equity)}</div></div>
         <div class="kpi"><div class="kk">借入残高</div><div class="kv2">${man(s.loanBalance)}</div></div>
-        <div class="kpi"><div class="kk">満室想定 年間賃料</div><div class="kv2">${man(s.fullYear)}</div></div>
-        <div class="kpi"><div class="kk">入居</div><div class="kv2">${s.occupied}/${s.units}<small> ${pct(s.occRate).replace(/\.\d+/, '')}</small></div></div>
+        <div class="kpi"><div class="kk">取得額の合計</div><div class="kv2">${man(s.price)}</div></div>
+        <div class="kpi"><div class="kk">入居</div><div class="kv2">${s.occupied}/${s.units}<small> ${Math.round(s.occRate * 100)}%</small></div></div>
         <div class="kpi"><div class="kk">表面利回り</div><div class="kv2">${pct(s.grossYield)}</div></div>
       </div>
-      ${s.missingPrice ? `<div class="small muted">取得価格が未入力の資産が${s.missingPrice}件あります（利回りの計算から外しています）</div>` : ''}
+      <div class="small muted">資産価値は、査定額が入っていればその額、なければ「いまの年間の手取り（賃料−運営費）÷ 想定の利回り」の目安です。</div>
     </div>
-    <a class="btn hero" href="#/assets/new">＋ 資産を追加する</a>
-    ${list.map((x) => `<a class="card" href="#/assets/${enc(x.id)}">
-      <div class="row"><strong>${esc(x.name)}</strong><span class="small num">${x.kpi.occupied}/${x.kpi.units}室</span></div>
-      <div>${srcBadge(x)}</div>
-      <div class="small muted">${esc(x.address)}</div>
-      <div class="row small"><span>満室想定 ${man(x.kpi.fullYear)}／年</span><span>表面 ${pct(x.kpi.grossYield)}</span></div>
-    </a>`).join('')}`;
+    ${seg}
+    ${view === 'timeline' ? '' : '<a class="btn hero" href="#/assets/new">＋ 資産を追加する</a>'}
+    ${body}`;
+  afterRender();
 }
 
 function viewAssetNew() {
@@ -484,9 +555,11 @@ function financeFields(f = {}) {
     ${inp('loanMonthly', '毎月の返済額', '310000')}
     ${inp('propertyTax', '固定資産税（年）', '620000')}
     ${inp('insurance', '保険料（年）', '80000')}
+    ${inp('appraisal', '査定額（あれば）', '')}
+    ${inp('capRate', '想定の利回り（価値の計算用）', '', '%')}
   </div>`;
 }
-const readFinance = () => Object.fromEntries(['price', 'acquired', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance'].map((k) => [k, document.getElementById(`f-${k}`).value]));
+const readFinance = () => Object.fromEntries(['price', 'acquired', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance', 'appraisal', 'capRate'].map((k) => [k, document.getElementById(`f-${k}`).value]));
 
 async function viewAssetForm(mode, id) {
   // mode: 'self' | 'import'（新規）／ 'edit'（自分で作った資産の編集）
@@ -573,15 +646,50 @@ async function viewAssetForm(mode, id) {
   };
 }
 
-async function viewAsset(id) {
+async function viewAsset(id, pane = 'now') {
   const x = await api(`/assets/${enc(id)}`);
   const k = x.kpi;
+  const v = x.value;
   const own = x.source !== 'link';
+  const P = (name, html) => `<section data-pane="${name}" ${name === pane ? '' : 'hidden'}>${html}</section>`;
+  const past = x.timeline.filter((e) => e.when === 'past');
+  const future = x.timeline.filter((e) => e.when !== 'past');
   $app.innerHTML = `
     <p><a href="#/assets">← 資産</a></p>
     <h1>${esc(x.name)}</h1>
     <div>${srcBadge(x)}</div>
     <div class="small muted">${esc(x.address)}${x.structure ? `／${esc(x.structure)}造` : ''}${x.floors ? ` ${x.floors}階建` : ''}${x.built ? `／${esc(x.built.slice(0, 4))}年${Number(x.built.slice(5))}月築` : ''}</div>
+    <div class="seg" id="panes">
+      <button type="button" data-p="past">⏪ 過去</button>
+      <button type="button" data-p="now">📍 いま</button>
+      <button type="button" data-p="future">⏩ 未来</button>
+    </div>
+    ${P('past', `
+      <h2>月ごとの収支</h2>
+      <div class="card"><table class="small">
+        <tr><th>月</th><th class="r">収入</th><th class="r">支出</th><th class="r">差引</th></tr>
+        ${x.monthly.map((m) => `<tr><td>${esc(ym(m.month))}</td><td class="r num">${yen(m.income)}</td><td class="r num">${yen(m.expense)}</td><td class="r num"><b>${yen(m.net)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="muted">まだ記録がありません</td></tr>'}
+      </table>${own ? '' : `<div class="small muted">${esc(x.company)}の計算どおり（収入＝入金額、支出＝管理料＋費用）。</div>`}</div>
+      <h2>これまでの出来事</h2>${tlHTML(past)}`)}
+    ${P('future', `
+      <h2>これから10年の手取り（目安）</h2>
+      <div class="card"><div class="tablewrap"><table class="small">
+        <tr><th>年</th><th class="r">賃料</th><th class="r">運営費</th><th class="r">修繕</th><th class="r">返済</th><th class="r">手取り</th><th class="r">借入残高</th></tr>
+        ${x.projection.years.map((y) => `<tr><td>${y.year}</td><td class="r num">${man(y.rent)}</td><td class="r num">${man(y.cost)}</td><td class="r num">${y.repair ? man(y.repair) : '—'}</td><td class="r num">${y.loan ? man(y.loan) : '—'}</td><td class="r num ${y.cash < 0 ? 'neg' : ''}"><b>${y.cash < 0 ? '−' : ''}${man(Math.abs(y.cash))}</b></td><td class="r num">${man(y.loanBalance)}</td></tr>`).join('')}
+      </table></div>
+      <div class="small muted">前提：${esc(x.projection.assumptions)}。${x.loan.payoff ? `ローン完済は${esc(ym(x.loan.payoff))}の見込み。` : ''}${x.loan.warning ? esc(x.loan.warning) : ''}</div></div>
+      <h2>これからの予定</h2>${tlHTML(future)}`)}
+    ${P('now', `
+    <div class="card">
+      <div class="row"><strong>💎 資産価値</strong><span class="small muted">${v.method === 'appraisal' ? '査定額' : `推定（想定の利回り ${v.capRate}%）`}</span></div>
+      <div class="big num">${man(v.value)}</div>
+      <div class="kpis">
+        <div class="kpi"><div class="kk">純資産（価値−借入）</div><div class="kv2 ${v.equity < 0 ? 'neg' : ''}">${man(v.equity)}</div></div>
+        <div class="kpi"><div class="kk">取得価格との差</div><div class="kv2 ${v.gain < 0 ? 'neg' : ''}">${v.gain == null ? '—' : `${v.gain < 0 ? '−' : '＋'}${man(Math.abs(v.gain))}`}</div></div>
+        <div class="kpi"><div class="kk">年間の手取り（賃料−運営費）</div><div class="kv2">${man(v.noi)}</div></div>
+      </div>
+      ${v.method === 'income' ? `<div class="small muted">推定＝年間の手取り ÷ 想定の利回り。査定額があれば下の「取得・借入・税・保険」に入れると、そちらを使います。</div>` : ''}
+    </div>
     <div class="card">
       <div class="kpis">
         <div class="kpi"><div class="kk">入居</div><div class="kv2">${k.occupied}/${k.units}<small>室</small></div></div>
@@ -597,17 +705,9 @@ async function viewAsset(id) {
     <h2>部屋</h2>
     <div class="card"><table class="small">
       <tr><th>部屋</th><th>間取り</th><th class="r">賃料＋共益費</th><th class="r">状態</th></tr>
-      ${x.rooms.map((r) => `<tr><td>${esc(r.no)}</td><td>${esc(r.layout || '—')}</td><td class="r num">${yen(r.rent + r.fee)}</td><td class="r"><span class="pill ${r.status === '空室' ? 'warn' : 'ok'}">${esc(r.status)}</span></td></tr>`).join('') || '<tr><td colspan="4" class="muted">部屋が登録されていません</td></tr>'}
+      ${x.rooms.map((r) => `<tr class="click" data-room="${esc(r.no)}"><td><a href="#/assets/${enc(id)}/rooms/${enc(r.no)}">${esc(r.no)}</a></td><td>${esc(r.layout || '—')}</td><td class="r num">${yen(r.rent + r.fee)}</td><td class="r"><span class="pill ${r.status === '空室' ? 'warn' : 'ok'}">${esc(r.status)}</span></td></tr>`).join('') || '<tr><td colspan="4" class="muted">部屋が登録されていません</td></tr>'}
     </table>${own ? `<a class="btn sub" href="#/assets/${enc(id)}/edit">基本情報・部屋を編集</a>` : `<div class="small muted">部屋と入居状況は${esc(x.company)}のデータです（${esc(ym(seedClosedLabel()))}末時点）。</div>`}</div>
 
-    <h2>月ごとの収支</h2>
-    <div class="card">
-      <table class="small">
-        <tr><th>月</th><th class="r">収入</th><th class="r">支出</th><th class="r">差引</th></tr>
-        ${x.monthly.map((m) => `<tr><td>${esc(ym(m.month))}</td><td class="r num">${yen(m.income)}</td><td class="r num">${yen(m.expense)}</td><td class="r num"><b>${yen(m.net)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="muted">まだ記録がありません</td></tr>'}
-      </table>
-      ${own ? '' : `<div class="small muted">${esc(x.company)}の計算どおり（収入＝入金額、支出＝管理料＋費用）。<a href="#/money">収支・送金へ</a></div>`}
-    </div>
     ${own ? `
       <h2>収入・支出を記録</h2>
       <form id="lf" class="card">
@@ -632,7 +732,15 @@ async function viewAsset(id) {
     </form>
 
     ${x.works.length ? `<h2>工事</h2><div class="card">${x.works.map((w) => `<div class="row small"><span>${esc(w.title)}</span><span class="pill info">${esc(w.status)}</span></div>`).join('')}<a class="small" href="#/works">工事の詳しい様子 ›</a></div>` : ''}
-    ${own ? '<button class="btn danger" id="del">この資産を削除する</button>' : `<p class="small muted">この建物は${esc(x.company)}（${esc(x.system)}）から届いています。<a href="#/menu/companies">管理会社</a></p>`}`;
+    ${own ? '<button class="btn danger" id="del">この資産を削除する</button>' : `<p class="small muted">この建物は${esc(x.company)}（${esc(x.system)}）から届いています。<a href="#/menu/companies">管理会社</a></p>`}`)}`;
+  document.querySelectorAll('#panes button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.p === pane);
+    b.onclick = () => {
+      pane = b.dataset.p;
+      document.querySelectorAll('#panes button').forEach((c) => c.classList.toggle('on', c === b));
+      document.querySelectorAll('[data-pane]').forEach((sec) => { sec.hidden = sec.dataset.pane !== pane; });
+    };
+  });
 
   document.getElementById('ff').onsubmit = async (e) => {
     e.preventDefault();
@@ -665,6 +773,28 @@ async function viewAsset(id) {
     toast('削除しました'); location.hash = '#/assets';
   };
 }
+async function viewRoom(id, no) {
+  const r = await api(`/assets/${enc(id)}/rooms/${enc(no)}`);
+  const x = r.room;
+  const past = r.timeline.filter((e) => e.when === 'past');
+  const future = r.timeline.filter((e) => e.when !== 'past');
+  $app.innerHTML = `
+    <p><a href="#/assets/${enc(id)}">← ${esc(r.asset.name)}</a></p>
+    <h1>${esc(x.no)}号室</h1>
+    <div class="small muted">${esc(r.asset.name)}</div>
+    <div class="card">
+      <div class="row"><span class="pill ${x.status === '空室' ? 'warn' : 'ok'}">${esc(x.status)}</span><span class="small muted">${esc(x.layout || '')}</span></div>
+      <div class="kpis">
+        <div class="kpi"><div class="kk">賃料</div><div class="kv2">${yen(x.rent)}</div></div>
+        <div class="kpi"><div class="kk">共益費</div><div class="kv2">${yen(x.fee)}</div></div>
+        <div class="kpi"><div class="kk">${x.moveOut ? '退去' : '入居'}</div><div class="kv2">${x.moveOut ? esc(ym(x.moveOut)) : x.since ? esc(ym(x.since)) : '—'}</div></div>
+        <div class="kpi"><div class="kk">次の契約更新</div><div class="kv2">${x.leaseEnd ? esc(ym(x.leaseEnd)) : '—'}</div></div>
+      </div>
+      <div class="small muted">入居者の情報は持ちません。${r.asset.source === 'link' ? `入居・契約の時期は${esc(r.asset.company)}のデータです。` : ''}</div>
+    </div>
+    <h2>⏪ 過去</h2>${tlHTML(past, { roomLinks: false })}
+    <h2>⏩ いま・未来</h2>${tlHTML(future, { roomLinks: false })}`;
+}
 let closedLatest = '';
 const seedClosedLabel = () => closedLatest;
 
@@ -684,7 +814,7 @@ async function refreshBadge() {
 
 async function route() {
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
-  const [page = 'home', a1, a2] = parts;
+  const [page = 'home', a1, a2, a3] = parts;
   const loggedIn = !!session;
   document.getElementById('tabs').hidden = !loggedIn;
   document.getElementById('bell').hidden = !loggedIn;
@@ -700,6 +830,8 @@ async function route() {
     else if (page === 'works') await viewWorks();
     else if (page === 'assets') {
       if (a1 === 'new') await (a2 ? viewAssetForm(a2 === 'import' ? 'import' : 'self') : viewAssetNew());
+      else if (['by-company', 'by-type', 'timeline'].includes(a1)) await viewAssets(a1);
+      else if (a1 && a2 === 'rooms' && a3) await viewRoom(a1, a3);
       else if (a1) await (a2 === 'edit' ? viewAssetForm('edit', a1) : viewAsset(a1));
       else await viewAssets();
     }

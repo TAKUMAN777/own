@@ -275,3 +275,49 @@ test('資料の読み込み：部屋一覧・収支・Shift_JIS、入居者名�
   assert.equal(r2.items[0].rent, 50000);
   assert.equal(detect(parseCSV('a,b\n1,2')).kind, null);
 });
+
+// ---------- 資産価値・タイムライン ----------
+test('資産価値：推定＝年間の手取り÷想定の利回り、査定額があればそれを使う、合計が合う', async () => {
+  const t = await login('HKT-0001');
+  const { summary, list } = (await call('/assets', { token: t })).body;
+  assert.equal(summary.value, list.reduce((s, x) => s + x.value.value, 0));
+  assert.equal(summary.equity, list.reduce((s, x) => s + x.value.equity, 0));
+  for (const x of list) {
+    assert.equal(x.value.noi, x.kpi.curYear - x.kpi.annualCost);
+    assert.equal(x.value.equity, x.value.value - (x.finance.loanBalance || 0));
+    if (x.value.method === 'income' && x.value.noi > 0) assert.ok(Math.abs(x.value.value - x.value.noi / (x.value.capRate / 100)) <= 5000);
+  }
+  const x = list.find((v) => v.source === 'link');
+  const upd = (await call(`/assets/${x.id}`, { token: t, method: 'PATCH', body: { finance: { ...x.finance, appraisal: 150000000 } } })).body;
+  assert.equal(upd.value.method, 'appraisal');
+  assert.equal(upd.value.value, 150000000);
+  const cap = (await call(`/assets/${x.id}`, { token: t, method: 'PATCH', body: { finance: { ...x.finance, appraisal: 0, capRate: 4 } } })).body;
+  assert.equal(cap.value.capRate, 4);
+});
+
+test('過去・現在・未来：建物・部屋・全体のタイムライン、ローン完済、10年の見通し', async () => {
+  const t = await login('HKT-0001');
+  const { list } = (await call('/assets', { token: t })).body;
+  const x = list.find((v) => v.source === 'link' && v.buildingId === 'BL-01');
+  const d = (await call(`/assets/${x.id}`, { token: t })).body;
+  const kinds = new Set(d.timeline.map((e) => e.kind));
+  for (const k of ['build', 'acquire', 'contract', 'money', 'work', 'proposal', 'room', 'repair', 'loan', 'now']) assert.ok(kinds.has(k), `${k} がない`);
+  assert.ok(d.timeline.every((e, i, a) => i === 0 || a[i - 1].at <= e.at), '時間の順');
+  assert.ok(d.timeline.some((e) => e.when === 'past') && d.timeline.some((e) => e.when === 'future'));
+  assert.equal(d.timeline.filter((e) => e.kind === 'now').length, 1);
+  assert.ok(d.loan.payoff > d.now);
+  assert.equal(d.projection.years.length, 10);
+  for (const y of d.projection.years) assert.equal(y.cash, y.rent - y.cost - y.repair - y.loan);
+  assert.ok(d.projection.years[9].loanBalance < d.finance.loanBalance);
+  // 部屋：その部屋の出来事だけ（工事・提案の「203号室」も含む）
+  const r = (await call(`/assets/${x.id}/rooms/203`, { token: t })).body;
+  assert.equal(r.room.no, '203');
+  assert.ok(r.timeline.every((e) => e.room === '203'));
+  assert.ok(r.timeline.some((e) => e.kind === 'proposal'));
+  assert.deepEqual(Object.keys(r.room).filter((k) => /name|tel|tenant/i.test(k)), []);
+  assert.equal((await call(`/assets/${x.id}/rooms/999`, { token: t })).status, 404);
+  // 全体
+  const all = (await call('/timeline', { token: t })).body;
+  assert.ok(new Set(all.events.filter((e) => e.assetId).map((e) => e.assetId)).size === list.length);
+  assert.equal(all.events.filter((e) => e.kind === 'now').length, 1);
+});

@@ -107,11 +107,13 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     if (M === 'GET' && p === '/reports') return send(res, 200, store.reports(A));
     if (M === 'GET' && p === '/works') return send(res, 200, store.works(A));
     if (M === 'GET' && p === '/notifications') return send(res, 200, store.notifications(A));
+    if (M === 'GET' && p === '/timeline') return send(res, 200, store.timeline(A));
     // 資産（建物）
     if (seg[0] === 'assets') {
       if (seg.length === 1 && M === 'GET') return send(res, 200, store.assets(A));
       if (seg.length === 1 && M === 'POST') return send(res, 200, store.createAsset(A, (await readBody(req)).json()));
       if (seg.length === 2 && M === 'GET') return send(res, 200, store.asset(A, seg[1]));
+      if (seg.length === 4 && seg[2] === 'rooms' && M === 'GET') return send(res, 200, store.room(A, seg[1], seg[3]));
       if (seg.length === 2 && M === 'PATCH') return send(res, 200, store.updateAsset(A, seg[1], (await readBody(req)).json()));
       if (seg.length === 2 && M === 'DELETE') return send(res, 200, store.deleteAsset(A, seg[1]));
       if (seg.length === 3 && seg[2] === 'ledger' && M === 'POST') return send(res, 200, store.addLedger(A, seg[1], (await readBody(req)).json()));
