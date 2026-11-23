@@ -146,8 +146,8 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480"><rect width="640" height="480" fill="${before ? '#8a8f98' : '#d7e6f5'}"/>
 <rect x="40" y="300" width="560" height="140" fill="${before ? '#6b6f76' : '#b9cfe4'}"/>
 ${[120, 260, 400, 540].map((x) => `<circle cx="${x}" cy="90" r="22" fill="${before ? '#c9b87a' : '#fffbe6'}" ${before ? '' : 'stroke="#f5d76e" stroke-width="10"'}/>`).join('')}
-<text x="320" y="250" font-family="sans-serif" font-size="30" text-anchor="middle" fill="${before ? '#fff' : '#1f3b57'}">${esc(ph.caption)}</text>
-<text x="320" y="290" font-family="sans-serif" font-size="18" text-anchor="middle" fill="${before ? '#eee' : '#3d5a78'}">デモ用の画像（架空）</text></svg>`;
+<text x="320" y="250" font-family="'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic',Meiryo,sans-serif" font-size="30" text-anchor="middle" fill="${before ? '#fff' : '#1f3b57'}">${esc(ph.caption)}</text>
+<text x="320" y="290" font-family="'Noto Sans JP','Hiragino Kaku Gothic ProN','Yu Gothic',Meiryo,sans-serif" font-size="18" text-anchor="middle" fill="${before ? '#eee' : '#3d5a78'}">デモ用の画像（架空）</text></svg>`;
     res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'private, max-age=300' });
     res.end(svg);
   }
