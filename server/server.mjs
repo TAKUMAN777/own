@@ -1,4 +1,4 @@
-// オーナー向けサービス（ホワイトラベル）のサーバー
+// オーナー自身が使うアプリのサーバー（複数の管理会社とつながる）
 // - 静的配信（public/）
 // - API（/api/v1/...）：引き継ぎメモ「6. 連動のAPI案」の形。今は架空データのモック。
 // 起動：PORT=8791 npm start
@@ -15,7 +15,7 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 
 export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'demo-secret' } = {}) {
   const store = createStore();
-  const sessions = new Map(); // token → { ownerId, tenantId, exp }
+  const sessions = new Map(); // token → { accountId, exp }
   const attempts = new Map(); // ip → { n, until }
 
   const send = (res, status, body, headers = {}) => {
@@ -44,11 +44,6 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     }
     return { ...s, token: m[1] };
   }
-  // パスの ownerId とログイン中のオーナーが一致しないと見せない
-  function sameOwner(s, ownerId) {
-    if (s.ownerId !== ownerId) throw new HttpError(403, 'forbidden', 'このデータは表示できません');
-  }
-
   function verifySignature(req, raw) {
     const sig = String(req.headers['x-signature'] || '');
     const expected = 'sha256=' + crypto.createHmac('sha256', webhookSecret).update(raw).digest('hex');
@@ -61,26 +56,23 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     const seg = p.split('/').filter(Boolean).map(decodeURIComponent);
     const M = req.method;
 
-    if (M === 'GET' && p === '/tenant') {
-      const t = store.tenant();
-      return send(res, 200, { company: t.company, ownerService: t.ownerService, tel: t.tel, demo: true });
-    }
+    if (M === 'GET' && p === '/app') return send(res, 200, { name: store.app().name, demo: true });
 
     if (M === 'POST' && p === '/auth/invite') {
       const ip = req.socket.remoteAddress || '';
       const a = attempts.get(ip) || { n: 0, until: 0 };
       if (a.until > Date.now()) throw new HttpError(429, 'too_many', 'しばらく時間をおいてからお試しください');
       const body = (await readBody(req)).json();
-      let inv;
-      try { inv = store.redeemInvite(body.code); } catch (e) {
+      let acc;
+      try { acc = store.login(body.code); } catch (e) {
         a.n += 1; if (a.n >= 5) { a.n = 0; a.until = Date.now() + 60_000; }
         attempts.set(ip, a);
         throw e;
       }
       attempts.delete(ip);
       const token = crypto.randomBytes(24).toString('base64url');
-      sessions.set(token, { ownerId: inv.ownerId, tenantId: inv.tenantId, exp: Date.now() + SESSION_MS });
-      return send(res, 200, { token, ownerId: inv.ownerId });
+      sessions.set(token, { accountId: acc.id, exp: Date.now() + SESSION_MS });
+      return send(res, 200, { token, accountId: acc.id });
     }
 
     if (M === 'POST' && p === '/auth/logout') {
@@ -104,42 +96,35 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
 
     const s = auth(req);
 
-    if (M === 'GET' && p === '/me') return send(res, 200, store.ownerProfile(s.ownerId));
+    const A = s.accountId;
+    const q = (k) => url.searchParams.get(k);
+    if (M === 'GET' && p === '/me') return send(res, 200, store.me(A));
+    if (M === 'POST' && p === '/links') return send(res, 200, store.addLink(A, (await readBody(req)).json().code));
     if (M === 'GET' && p === '/months') return send(res, 200, store.months());
-
-    if (seg[0] === 'owners' && seg[1]) {
-      sameOwner(s, seg[1]);
-      const id = seg[1];
-      if (M === 'GET' && seg.length === 2) return send(res, 200, store.ownerProfile(id));
-      if (M === 'GET' && seg[2] === 'pl' && seg.length === 3) return send(res, 200, store.pl(id, url.searchParams.get('month')));
-      if (M === 'GET' && seg[2] === 'proposals' && seg.length === 3) return send(res, 200, store.proposals(id, url.searchParams.get('status')));
-      if (M === 'GET' && seg[2] === 'remittances' && seg.length === 3) return send(res, 200, store.remittances(id));
-      if (M === 'GET' && seg[2] === 'reports' && seg.length === 3) return send(res, 200, store.reports(id, url.searchParams.get('month')));
-      if (M === 'GET' && seg[2] === 'works' && seg.length === 3) return send(res, 200, store.works(id));
-      if (M === 'GET' && seg[2] === 'notifications' && seg.length === 3) return send(res, 200, store.notifications(id));
-    }
-
-    if (seg[0] === 'proposals' && seg[1]) {
-      if (M === 'GET' && seg.length === 2) {
-        const pr = store.proposal(seg[1]);
-        if (pr.ownerId !== s.ownerId) throw new HttpError(404, 'not_found', 'ご提案が見つかりません');
-        return send(res, 200, pr);
+    if (M === 'GET' && p === '/pl') return send(res, 200, store.pl(A, q('month')));
+    if (M === 'GET' && p === '/proposals') return send(res, 200, store.proposals(A, q('status')));
+    if (M === 'GET' && p === '/remittances') return send(res, 200, store.remittances(A));
+    if (M === 'GET' && p === '/reports') return send(res, 200, store.reports(A));
+    if (M === 'GET' && p === '/works') return send(res, 200, store.works(A));
+    if (M === 'GET' && p === '/notifications') return send(res, 200, store.notifications(A));
+    // 管理会社ごとのデータ：/companies/{tenantId}/...
+    if (seg[0] === 'companies' && seg[1]) {
+      if (M === 'GET' && seg[2] === 'proposals' && seg[3] && seg.length === 4) return send(res, 200, store.proposal(A, seg[1], seg[3]));
+      if (M === 'POST' && seg[2] === 'proposals' && seg[3] && seg[4] === 'respond' && seg.length === 5) {
+        return send(res, 200, store.respond(A, seg[1], seg[3], (await readBody(req)).json()));
       }
-      if (M === 'POST' && seg[2] === 'respond' && seg.length === 3) {
-        const body = (await readBody(req)).json();
-        return send(res, 200, store.respond(seg[1], s.ownerId, body));
-      }
+      if (M === 'GET' && seg[2] === 'reports' && seg[3] && seg.length === 4) return send(res, 200, store.report(A, seg[1], seg[3]));
     }
 
     throw new HttpError(404, 'not_found', '見つかりません');
   }
 
-  // 工事写真（デモ用のプレースホルダー画像）
+  // 工事写真（デモ用のプレースホルダー画像）。つながっている管理会社の工事のものだけ
   function photo(req, res, url) {
     const id = url.pathname.replace(/^\/photos\//, '').replace(/\.svg$/, '');
     const token = url.searchParams.get('t');
     const s = token && sessions.get(token);
-    if (!s || s.exp < Date.now() || !store.photoBelongsTo(id, s.ownerId)) { res.writeHead(404); return res.end(); }
+    if (!s || s.exp < Date.now() || !store.photoBelongsTo(id, s.accountId)) { res.writeHead(404); return res.end(); }
     const ph = store.photo(id);
     const before = ph.kind === 'before';
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

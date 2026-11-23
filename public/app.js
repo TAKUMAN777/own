@@ -1,9 +1,10 @@
-// オーナー向けサービス（フロント）
-// ルール：金額はサーバー（REVO管理）の計算結果をそのまま表示し、ここでは再計算しない。
-//         入居者の個人情報は扱わない（部屋番号まで）。サービス名・会社名は管理会社の設定値を使う。
+// オーナー自身が使うアプリ（フロント）
+// - オーナーのアカウントに、複数の管理会社がつながる。データの正は各社の管理システム。
+// - 金額は各社の計算結果をそのまま表示し、ここでは再計算しない（会社をまたぐ合計はサーバーで出す）。
+// - 入居者の個人情報は扱わない（部屋番号まで）。
 const $app = document.getElementById('app');
-const KEY = 'owner-session-v1';
-let tenant = null;
+const KEY = 'owner-app-session-v2';
+let appInfo = null;
 let me = null;
 
 const store = {
@@ -18,6 +19,8 @@ const yen = (n) => `${Number(n).toLocaleString('ja-JP')}円`;
 const ym = (m) => `${m.slice(0, 4)}年${Number(m.slice(5))}月`;
 const md = (iso) => { const d = new Date(iso); return `${d.getMonth() + 1}月${d.getDate()}日`; };
 const ymd = (s) => { const [y, m, d] = s.slice(0, 10).split('-'); return `${y}年${Number(m)}月${Number(d)}日`; };
+const enc = encodeURIComponent;
+const co = (x) => `<span class="co">${esc(x.company)}</span>`;
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -36,13 +39,18 @@ async function api(path, opts = {}) {
   if (!res.ok) { const e = new Error(data.message || 'エラーが発生しました'); e.code = data.error; throw e; }
   return data;
 }
-const ownerApi = (p) => api(`/owners/${encodeURIComponent(session.ownerId)}${p}`);
 
 function logout(expired) {
   if (session && !expired) api('/auth/logout', { method: 'POST' }).catch(() => {});
   session = null; me = null; store.clear();
+  setHeader();
   location.hash = '#/login';
   if (expired) toast('もう一度ログインしてください');
+}
+
+function setHeader() {
+  document.getElementById('app-name').textContent = appInfo.name;
+  document.getElementById('who').textContent = me ? `${me.name} 様` : 'オーナー様のためのアプリ';
 }
 
 const STATUS = {
@@ -52,113 +60,91 @@ const DECISION = { approve: '承認', conditional: '条件付きで承認', retu
 
 // ---------- 画面 ----------
 
+function codeForm(id, label) {
+  return `<form id="${id}" class="card">
+      <label for="${id}-code">招待コード</label>
+      <input id="${id}-code" type="text" autocomplete="one-time-code" autocapitalize="characters" placeholder="例：HKT-0001" required>
+      <div class="err" id="${id}-err"></div>
+      <button class="btn">${label}</button>
+    </form>`;
+}
+
 function viewLogin() {
   $app.innerHTML = `
-    <h1>ログイン</h1>
-    <p>${esc(tenant.company)}からお送りした<strong>招待コード</strong>を入力してください。</p>
-    <form id="f" class="card">
-      <label for="code">招待コード</label>
-      <input id="code" type="text" autocomplete="one-time-code" autocapitalize="characters" placeholder="例：HKT-0001" required>
-      <div class="err" id="err"></div>
-      <button class="btn">ログイン</button>
-    </form>
-    <p class="notice">デモ用の招待コード：<strong>HKT-0001</strong>（田中様・2棟）／<strong>HKT-0002</strong>（山本様・1棟）</p>
-    <p class="small muted">招待コードがお手元にない場合は、${esc(tenant.company)}（${esc(tenant.tel)}）までお問い合わせください。</p>`;
+    <div class="hello">ようこそ</div>
+    <p>物件の管理を任せている管理会社から届いた<strong>招待コード</strong>を入力してください。<br>
+      その会社からのご提案・送金・報告書・工事の様子が、このアプリにまとめて届きます。</p>
+    ${codeForm('f', 'はじめる')}
+    <p class="notice">デモ用の招待コード：<strong>HKT-0001</strong>（田中様）／<strong>HKT-0002</strong>（山本様）<br>
+      田中様はログイン後、メニューの「管理会社」で <strong>TNJ-0011</strong> を入れると2社目がつながります。</p>`;
   document.getElementById('f').onsubmit = async (e) => {
     e.preventDefault();
     const btn = e.target.querySelector('button');
     btn.disabled = true;
     try {
-      const r = await api('/auth/invite', { method: 'POST', body: { code: document.getElementById('code').value } });
+      const r = await api('/auth/invite', { method: 'POST', body: { code: document.getElementById('f-code').value } });
       session = r; store.set(r);
       location.hash = '#/home';
     } catch (err) {
-      document.getElementById('err').textContent = err.message;
+      document.getElementById('f-err').textContent = err.message;
     } finally { btn.disabled = false; }
   };
 }
 
 async function viewHome() {
   const [pending, months, rems, works] = await Promise.all([
-    ownerApi('/proposals?status=sent'), api('/months'), ownerApi('/remittances'), ownerApi('/works'),
+    api('/proposals?status=sent'), api('/months'), api('/remittances'), api('/works'),
   ]);
   const last = months.closed[months.closed.length - 1];
-  const pl = await ownerApi(`/pl?month=${last}`);
-  const rem = rems.find((r) => r.month === last);
+  const pl = await api(`/pl?month=${last}`);
+  const monthRems = rems.filter((r) => r.month === last);
   const active = works.filter((w) => w.status !== '支払済');
+  const nb = me.links.reduce((s, l) => s + l.buildings.length, 0);
   const chip = (href, ic, label, n, unit = '') => `<a class="chip" href="${href}"><span class="ic">${ic}</span>${label}<b>${n}</b>${unit ? `<small>${unit}</small>` : ''}</a>`;
   $app.innerHTML = `
-    <div class="hello">${esc(me.name)} 様</div>
     <div class="chips">
-      ${chip('#/menu/buildings', '🏢', '物件', me.buildings.length, '棟')}
-      ${chip('#/money', '🏠', '入居', `${pl.occupied}/${pl.units}`)}
+      ${chip('#/menu/buildings', '🏢', '物件', nb, '棟')}
+      ${chip('#/money', '🏠', '入居', pl.total ? `${pl.total.occupied}/${pl.total.units}` : '—')}
       ${chip('#/proposals', '🤝', '回答待ち', pending.length)}
       ${chip('#/works', '🏗️', '工事中', active.length)}
+      ${chip('#/menu/companies', '🔗', '管理会社', me.links.length, '社')}
     </div>
     ${pending.length
-      ? `<a class="btn hero" href="#/proposals/${esc(pending[0].id)}">▶ ご提案に回答する（${pending.length}件）</a>`
-      : `<a class="btn hero" href="#/reports/${esc(last)}">📄 ${Number(last.slice(5))}月の月次報告書を見る</a>`}
-    ${pending.map((p) => `<a class="card attn" href="#/proposals/${esc(p.id)}">
+      ? `<a class="btn hero" href="#/proposals/${enc(pending[0].tenantId)}/${enc(pending[0].id)}">▶ ご提案に回答する（${pending.length}件）</a>`
+      : `<a class="btn hero" href="#/reports">📄 ${Number(last.slice(5))}月の月次報告書を見る</a>`}
+    ${pending.map((p) => `<a class="card attn" href="#/proposals/${enc(p.tenantId)}/${enc(p.id)}">
         <div class="row"><strong>${esc(p.title)}</strong><span class="pill warn">ご回答待ち</span></div>
-        <div class="small muted">${esc(md(p.sentAt))}にお送りしました・${p.quotes.length}案からお選びください</div></a>`).join('')}
+        <div class="small muted">${co(p)} ${esc(md(p.sentAt))}・${p.quotes.length}案からお選びください</div></a>`).join('')}
     <a class="card" href="#/money/${esc(last)}">
-      <div class="row"><span>💴 ${esc(ym(last))}分 ご送金額</span>${rem ? `<span class="pill ok">${esc(rem.status)}</span>` : ''}</div>
-      <div class="big num">${rem ? yen(rem.amount) : '—'}</div>
-      <div class="small muted">${rem ? `送金日 ${esc(ymd(rem.date))}` : ''}</div>
+      <div class="row"><span>💴 ${esc(ym(last))}分 ご送金の合計</span>${monthRems.length ? `<span class="pill ok">${monthRems.length}社 送金済</span>` : ''}</div>
+      <div class="big num">${monthRems.length ? yen(monthRems.reduce((s, r) => s + r.amount, 0)) : '—'}</div>
+      ${monthRems.map((r) => `<div class="row small"><span>${co(r)}</span><span class="num">${yen(r.amount)}（${esc(md(r.date))}）</span></div>`).join('')}
     </a>
     <a class="card" href="#/works">
       <div class="row"><strong>🏗️ 進行中の工事</strong><span class="pill info">${active.length}件</span></div>
-      ${active.map((w) => `<div class="small">${esc(w.title)}：${esc(w.status)}</div>`).join('') || '<div class="small muted">ありません</div>'}
+      ${active.map((w) => `<div class="small">${esc(w.title)}：${esc(w.status)}　${co(w)}</div>`).join('') || '<div class="small muted">ありません</div>'}
     </a>`;
 }
 
-async function viewNotices() {
-  const notes = await ownerApi('/notifications');
-  try { localStorage.setItem(KEY + ':seen', new Date().toISOString()); } catch { /* noop */ }
-  document.getElementById('bellDot').hidden = true;
-  $app.innerHTML = `<h1>🔔 お知らせ</h1>${notes.map((n) => `<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="card small"><div class="muted">${esc(md(n.at))}</div>${esc(n.title)}</${n.link ? 'a' : 'div'}>`).join('') || '<div class="card muted">新しいお知らせはありません</div>'}`;
-}
-
-function viewMenu(arg) {
-  if (arg === 'buildings') {
-    $app.innerHTML = `<p><a href="#/menu">← メニュー</a></p><h1>🏢 物件・契約</h1>
-      ${me.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}<br>${esc(b.structure)}造 ${b.floors}階建／${b.units}室／${esc(b.built.replace('-', '年'))}月築</div></div>`).join('')}
-      <h2>管理委託契約</h2>
-      ${me.mgmt.map((m) => `<div class="card small">管理料 入金額の${(m.rate * 100).toFixed(1)}%／毎月${m.remitDay}日送金<br>契約期間 ${esc(ymd(m.start))}〜${esc(ymd(m.end))}</div>`).join('')}`;
-    return;
-  }
-  const item = (href, ic, t, sub) => `<a class="menu-item" href="${href}"><span class="ic">${ic}</span><span><b>${t}</b><small>${sub}</small></span><span class="go">›</span></a>`;
-  $app.innerHTML = `
-    <h1>メニュー</h1>
-    <div class="menu">
-      ${item('#/reports', '📄', '月次報告書', '毎月の収支とご報告・PDFで保存')}
-      ${item('#/notices', '🔔', 'お知らせ', 'ご提案・送金・報告書のお知らせ')}
-      ${item('#/menu/buildings', '🏢', '物件・契約', '物件の一覧と管理委託契約')}
-      ${item(`tel:${esc(tenant.tel)}`, '📞', 'お問い合わせ', `${esc(tenant.company)}　${esc(tenant.tel)}`)}
-    </div>
-    <button class="btn sub" id="out">ログアウト</button>
-    <p class="small muted">${esc(me.name)} 様でログイン中</p>`;
-  document.getElementById('out').onclick = () => logout(false);
-}
-
 async function viewProposals() {
-  const list = await ownerApi('/proposals');
+  const list = await api('/proposals');
   const pending = list.filter((p) => p.status === 'sent');
   const done = list.filter((p) => p.status !== 'sent');
   const item = (p) => {
     const [label, cls] = STATUS[p.status] || [p.status, ''];
-    return `<a class="card" href="#/proposals/${esc(p.id)}">
+    return `<a class="card" href="#/proposals/${enc(p.tenantId)}/${enc(p.id)}">
       <div class="row"><strong>${esc(p.title)}</strong><span class="pill ${cls}">${esc(label)}</span></div>
-      <div class="small muted">${esc(md(p.sentAt))}にお送りしました・${p.quotes.length}案</div></a>`;
+      <div class="small muted">${co(p)} ${esc(md(p.sentAt))}・${p.quotes.length}案</div></a>`;
   };
   $app.innerHTML = `
-    <h1>ご提案</h1>
+    <h1>🤝 ご提案</h1>
     <h2>ご回答待ち</h2>${pending.map(item).join('') || '<p class="muted">ありません</p>'}
     <h2>これまでのご回答</h2>${done.map(item).join('') || '<p class="muted">ありません</p>'}`;
 }
 
-async function viewProposal(id) {
-  const p = await api(`/proposals/${encodeURIComponent(id)}`);
+async function viewProposal(tenantId, id) {
+  const base = `/companies/${enc(tenantId)}/proposals/${enc(id)}`;
+  const p = await api(base);
   const letters = 'ABCDEFG';
   const open = p.status === 'sent';
   const quoteCard = (q, i) => `
@@ -179,7 +165,7 @@ async function viewProposal(id) {
   $app.innerHTML = `
     <p class="no-print"><a href="#/proposals">← ご提案一覧</a></p>
     <h1>${esc(p.title)}</h1>
-    <div class="small muted">${esc(p.buildingName)}／${esc(md(p.sentAt))}にお送りしました</div>
+    <div class="small muted">${co(p)} ${esc(p.buildingName)}／${esc(md(p.sentAt))}に届きました</div>
     <h2>ご提案の理由</h2>
     <div class="card">${esc(p.reason)}${p.notes ? `<div class="small muted" style="margin-top:6px">${esc(p.notes)}</div>` : ''}</div>
     ${answered}
@@ -193,11 +179,11 @@ async function viewProposal(id) {
           <button type="button" data-d="conditional" aria-pressed="false">条件付きで承認</button>
           <button type="button" data-d="return" aria-pressed="false">差戻し</button>
         </div>
-        <label for="c" id="clabel" class="small">コメント（任意）</label>
+        <label for="c" id="clabel">コメント（任意）</label>
         <textarea id="c" maxlength="500" placeholder=""></textarea>
         <div class="err" id="err"></div>
-        <button class="btn" id="go">この内容で回答する</button>
-        <p class="small muted">ご回答は記録として${esc(tenant.company)}に届きます。発注などの手続きは担当者が確認のうえ行います。</p>
+        <button class="btn" id="go">この案で承認する</button>
+        <p class="small muted">ご回答は記録として${esc(p.company)}に届きます。発注などの手続きは、管理会社の担当者が確認のうえ行います。</p>
       </form>` : `<h2>見積の内容</h2>${p.quotes.map(quoteCard).join('')}`}`;
   if (!open) return;
 
@@ -221,69 +207,83 @@ async function viewProposal(id) {
     if (decision !== 'return' && !quoteId) { err.textContent = '案を選んでください'; return; }
     if (decision !== 'approve' && comment.length < 3) { err.textContent = decision === 'return' ? '差戻しの理由を3文字以上で入力してください' : '条件を3文字以上で入力してください'; return; }
     const q = p.quotes.find((x) => x.id === quoteId);
-    const msg = decision === 'return' ? 'このご提案を差戻します。よろしいですか？'
+    const msg = decision === 'return' ? `${p.company}へ、このご提案を差戻します。よろしいですか？`
       : `${letters[p.quoteIds.indexOf(quoteId)]}案（${q.contractor}・${yen(q.total)}）を${DECISION[decision]}します。よろしいですか？`;
     if (!confirm(msg)) return;
     const btn = document.getElementById('go');
     btn.disabled = true; err.textContent = '';
     try {
-      await api(`/proposals/${encodeURIComponent(p.id)}/respond`, { method: 'POST', body: { decision, quoteId: decision === 'return' ? undefined : quoteId, comment } });
+      await api(`${base}/respond`, { method: 'POST', body: { decision, quoteId: decision === 'return' ? undefined : quoteId, comment } });
       toast('ご回答を受け付けました');
       refreshBadge();
-      await viewProposal(p.id);
+      await viewProposal(tenantId, id);
     } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
   };
 }
 
+function plRows(x) {
+  return `
+    <tr><td>請求額</td><td class="r num">${yen(x.billed)}</td></tr>
+    <tr><td>入金額</td><td class="r num">${yen(x.received)}</td></tr>
+    ${x.unpaid ? `<tr><td>未入金</td><td class="r num neg">${yen(x.unpaid)}</td></tr>` : ''}
+    <tr><td>管理料</td><td class="r num">−${yen(x.fee)}</td></tr>
+    <tr><td>費用${x.expenses && x.expenses.length ? `<div class="muted">${x.expenses.map((e) => `${esc(e.kind)} ${yen(e.amount)}`).join('／')}</div>` : ''}</td><td class="r num">−${yen(x.expense)}</td></tr>
+    <tr class="total"><td>差引</td><td class="r num">${yen(x.remit)}</td></tr>`;
+}
+
 async function viewMoney(month) {
-  const [months, rems] = await Promise.all([api('/months'), ownerApi('/remittances')]);
+  const [months, rems] = await Promise.all([api('/months'), api('/remittances')]);
   const m = months.closed.includes(month) ? month : months.closed[months.closed.length - 1];
-  const pl = await ownerApi(`/pl?month=${m}`);
-  const rem = rems.find((r) => r.month === m);
+  const pl = await api(`/pl?month=${m}`);
+  const monthRems = rems.filter((r) => r.month === m);
   $app.innerHTML = `
-    <h1>収支・送金</h1>
+    <h1>💴 収支・送金</h1>
     <div class="seg">${months.months.map((x) => months.closed.includes(x)
       ? `<a href="#/money/${x}" class="${x === m ? 'on' : ''}">${Number(x.slice(5))}月</a>`
       : `<button disabled title="月締め前">${Number(x.slice(5))}月（締め前）</button>`).join('')}</div>
-    ${rem ? `<div class="card">
-      <div class="row"><span>${esc(ym(m))}分 ご送金額</span><span class="pill ok">${esc(rem.status)}</span></div>
-      <div class="big num">${yen(rem.amount)}</div>
-      <table class="small">
-        <tr><td>入金額（賃料・共益費）</td><td class="r num">${yen(rem.detail.received)}</td></tr>
-        <tr><td>管理料</td><td class="r num">−${yen(rem.detail.fee)}</td></tr>
-        <tr><td>費用（清掃・点検など）</td><td class="r num">−${yen(rem.detail.expense)}</td></tr>
-        ${rem.detail.works ? `<tr><td>工事代金<div class="muted">${rem.detail.worksOrders.map((w) => `${esc(w.title)} ${yen(w.amount)}`).join('<br>')}</div></td><td class="r num">−${yen(rem.detail.works)}</td></tr>` : ''}
-        <tr class="total"><td>ご送金額</td><td class="r num">${yen(rem.amount)}</td></tr>
-      </table>
-      <div class="small muted">送金日 ${esc(ymd(rem.date))}／${esc(rem.bank)}</div>
-    </div>` : '<div class="card muted">この月の送金はまだありません</div>'}
-    <h2>物件ごとの収支</h2>
-    ${pl.buildings.map((b) => `<div class="card">
-      <div class="row"><strong>${esc(b.name)}</strong><span class="small">入居 ${b.occupied}／${b.units}室</span></div>
-      <table class="small">
-        <tr><td>請求額</td><td class="r num">${yen(b.billed)}</td></tr>
-        <tr><td>入金額</td><td class="r num">${yen(b.received)}</td></tr>
-        ${b.unpaid ? `<tr><td>未入金</td><td class="r num" style="color:var(--ng)">${yen(b.unpaid)}</td></tr>` : ''}
-        <tr><td>管理料</td><td class="r num">−${yen(b.fee)}</td></tr>
-        <tr><td>費用${b.expenses.length ? `<div class="muted">${b.expenses.map((e) => `${esc(e.kind)} ${yen(e.amount)}`).join('／')}</div>` : ''}</td><td class="r num">−${yen(b.expense)}</td></tr>
-        <tr class="total"><td>差引</td><td class="r num">${yen(b.remit)}</td></tr>
-      </table></div>`).join('')}
-    <a class="btn sub" href="#/reports/${esc(m)}">📄 ${Number(m.slice(5))}月の月次報告書を見る</a>
-    <p class="small muted">月締めが終わった月の数字を表示しています。</p>`;
+    <div class="card">
+      <div class="row"><span>${esc(ym(m))}分 ご送金の合計</span><span class="small muted">${monthRems.length}社</span></div>
+      <div class="big num">${yen(monthRems.reduce((s, r) => s + r.amount, 0))}</div>
+      ${pl.total ? `<div class="small muted">入居 ${pl.total.occupied}／${pl.total.units}室　入金 ${yen(pl.total.received)}</div>` : ''}
+    </div>
+    ${pl.companies.map(({ tenantId, company, pl: cpl }) => {
+      const r = monthRems.find((x) => x.tenantId === tenantId);
+      return `<h2>🔗 ${esc(company)}</h2>
+      ${r ? `<div class="card">
+        <div class="row"><span>ご送金額</span><span class="pill ok">${esc(r.status)}</span></div>
+        <div class="big num">${yen(r.amount)}</div>
+        <table class="small">
+          <tr><td>入金額（賃料・共益費）</td><td class="r num">${yen(r.detail.received)}</td></tr>
+          <tr><td>管理料</td><td class="r num">−${yen(r.detail.fee)}</td></tr>
+          <tr><td>費用（清掃・点検など）</td><td class="r num">−${yen(r.detail.expense)}</td></tr>
+          ${r.detail.works ? `<tr><td>工事代金<div class="muted">${r.detail.worksOrders.map((w) => `${esc(w.title)} ${yen(w.amount)}`).join('<br>')}</div></td><td class="r num">−${yen(r.detail.works)}</td></tr>` : ''}
+          <tr class="total"><td>ご送金額</td><td class="r num">${yen(r.amount)}</td></tr>
+        </table>
+        <div class="small muted">送金日 ${esc(ymd(r.date))}／${esc(r.bank)}</div>
+      </div>` : '<div class="card muted">この月の送金はまだありません</div>'}
+      ${cpl ? cpl.buildings.map((b) => `<div class="card">
+        <div class="row"><strong>${esc(b.name)}</strong><span class="small">入居 ${b.occupied}／${b.units}室</span></div>
+        <table class="small">${plRows(b)}</table></div>`).join('') : '<div class="card muted">この月はまだ締めていません</div>'}
+      <a class="btn sub" href="#/reports/${enc(tenantId)}/${esc(m)}">📄 ${Number(m.slice(5))}月の月次報告書</a>`;
+    }).join('')}
+    <p class="small muted">月締めが終わった月の数字を、各管理会社の計算どおりに表示しています。</p>`;
 }
 
 async function viewReports() {
-  const list = await ownerApi('/reports');
-  $app.innerHTML = `<h1>月次報告書</h1>${list.map((r) => `<a class="card" href="#/reports/${esc(r.month)}">
-    <div class="row"><strong>${esc(ym(r.month))} 月次報告書</strong><span class="small muted">${esc(ymd(r.publishedAt))}</span></div></a>`).join('') || '<p class="muted">まだありません</p>'}`;
+  const list = await api('/reports');
+  const byMonth = {};
+  for (const r of list) (byMonth[r.month] ||= []).push(r);
+  $app.innerHTML = `<h1>📄 月次報告書</h1>${Object.entries(byMonth).map(([m, rs]) => `<h2>${esc(ym(m))}</h2>${rs.map((r) => `
+    <a class="card" href="#/reports/${enc(r.tenantId)}/${esc(r.month)}">
+      <div class="row"><strong>${esc(r.company)}</strong><span class="small muted">${esc(ymd(r.publishedAt))}</span></div></a>`).join('')}`).join('') || '<p class="muted">まだありません</p>'}`;
 }
 
-async function viewReport(month) {
-  const r = await ownerApi(`/reports?month=${encodeURIComponent(month)}`);
+async function viewReport(tenantId, month) {
+  const r = await api(`/companies/${enc(tenantId)}/reports/${enc(month)}`);
   const pl = r.pl;
   $app.innerHTML = `
     <p class="no-print"><a href="#/reports">← 報告書一覧</a></p>
-    <div class="doc-head">${esc(tenant.ownerService)}｜${esc(tenant.company)}</div>
+    <div class="doc-head">${esc(r.company)} からのご報告</div>
     <h1>${esc(ym(month))} 月次報告書</h1>
     <p>${esc(r.owner.name)} 様</p>
     <div class="card">
@@ -300,22 +300,21 @@ async function viewReport(month) {
     </div>
     <h2>今月のご報告</h2>
     <div class="card">${r.notes.length ? `<ul class="plain">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '<span class="muted">特記事項はありません</span>'}</div>
-    ${r.works.length ? `<h2>工事</h2><div class="card">${r.works.map((w) => `<div class="row"><span>${esc(w.title)}</span><span class="pill">${esc(w.status)}</span></div>`).join('')}</div>` : ''}
+    ${r.works.length ? `<h2>工事</h2><div class="card">${r.works.map((w) => `<div class="row"><span>${esc(w.title)}</span><span class="pill info">${esc(w.status)}</span></div>`).join('')}</div>` : ''}
     <h2>お部屋の状況</h2>
     ${pl.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong>
       <div class="rooms" style="margin-top:6px">${b.rooms.map((x) => `<span class="${esc(x.status)}">${esc(x.no)} ${esc(x.status)}</span>`).join('')}</div></div>`).join('')}
-    <button class="btn sub no-print" onclick="window.print()">印刷・PDFで保存</button>
-    <p class="print-only small">${esc(tenant.company)}　TEL ${esc(tenant.tel)}</p>`;
+    <button class="btn sub no-print" onclick="window.print()">印刷・PDFで保存</button>`;
 }
 
 async function viewWorks() {
-  const list = await ownerApi('/works');
-  const t = encodeURIComponent(session.token);
-  $app.innerHTML = `<h1>工事</h1>${list.map((w) => {
+  const list = await api('/works');
+  const t = enc(session.token);
+  $app.innerHTML = `<h1>🏗️ 工事</h1>${list.map((w) => {
     const idx = w.steps.indexOf(w.status);
     return `<div class="card">
       <div class="row"><strong>${esc(w.title)}</strong><span class="pill ${w.status === '支払済' ? 'ok' : 'info'}">${esc(w.status)}</span></div>
-      <div class="small muted">${esc(w.buildingName)}／${esc(w.contractor)}／${yen(w.amount)}</div>
+      <div class="small muted">${co(w)} ${esc(w.buildingName)}／${esc(w.contractor)}／${yen(w.amount)}</div>
       <ol class="steps">${w.steps.map((s, i) => `<li class="${i <= idx ? 'done' : ''} ${i === idx ? 'cur' : ''}">${esc(s)}</li>`).join('')}</ol>
       ${w.report ? `<p class="small">${esc(w.report)}</p>` : ''}
       ${w.photos.length ? `<div class="photos">${w.photos.map((ph) => `<figure><a href="/photos/${esc(ph.id)}.svg?t=${t}" target="_blank" rel="noopener"><img src="/photos/${esc(ph.id)}.svg?t=${t}" alt="${esc(ph.caption)}" loading="lazy"></a><figcaption>${esc(ph.caption)}</figcaption></figure>`).join('')}</div>` : ''}
@@ -324,36 +323,84 @@ async function viewWorks() {
   }).join('') || '<p class="muted">工事はありません</p>'}`;
 }
 
+async function viewNotices() {
+  const notes = await api('/notifications');
+  try { localStorage.setItem(KEY + ':seen', new Date().toISOString()); } catch { /* noop */ }
+  document.getElementById('bellDot').hidden = true;
+  $app.innerHTML = `<h1>🔔 お知らせ</h1>${notes.map((n) => `<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="card small"><div class="muted">${esc(md(n.at))}　${co(n)}</div>${esc(n.title)}</${n.link ? 'a' : 'div'}>`).join('') || '<div class="card muted">新しいお知らせはありません</div>'}`;
+}
+
+function viewMenu(arg) {
+  const back = '<p><a href="#/menu">← メニュー</a></p>';
+  if (arg === 'buildings') {
+    $app.innerHTML = `${back}<h1>🏢 物件・契約</h1>
+      ${me.links.map((l) => `<h2>🔗 ${esc(l.company)}</h2>
+        ${l.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}<br>${esc(b.structure)}造 ${b.floors}階建／${b.units}室／${esc(b.built.replace('-', '年'))}月築</div></div>`).join('')}
+        ${l.mgmt.map((m) => `<div class="card small">管理委託契約：管理料 入金額の${(m.rate * 100).toFixed(1)}%／毎月${m.remitDay}日送金<br>契約期間 ${esc(ymd(m.start))}〜${esc(ymd(m.end))}</div>`).join('')}`).join('')}`;
+    return;
+  }
+  if (arg === 'companies') {
+    $app.innerHTML = `${back}<h1>🔗 管理会社</h1>
+      <p class="small muted">物件の管理を任せている会社です。各社からのご提案・送金・報告書がこのアプリに届きます。</p>
+      <div class="menu">${me.links.map((l) => `<a class="menu-item" href="tel:${esc(l.tel)}"><span class="ic">🏢</span><span><b>${esc(l.company)}</b><small>物件 ${l.buildings.length}棟／📞 ${esc(l.tel)}</small></span><span class="go">›</span></a>`).join('')}</div>
+      <h2>＋ 管理会社を追加</h2>
+      <p class="small">追加したい管理会社から届いた招待コードを入力してください。</p>
+      ${codeForm('lk', 'つなげる')}`;
+    document.getElementById('lk').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        me = await api('/links', { method: 'POST', body: { code: document.getElementById('lk-code').value } });
+        toast('管理会社とつながりました');
+        viewMenu('companies');
+      } catch (err) { document.getElementById('lk-err').textContent = err.message; }
+    };
+    return;
+  }
+  const item = (href, ic, t, sub) => `<a class="menu-item" href="${href}"><span class="ic">${ic}</span><span><b>${t}</b><small>${sub}</small></span><span class="go">›</span></a>`;
+  $app.innerHTML = `
+    <h1>☰ メニュー</h1>
+    <div class="menu">
+      ${item('#/reports', '📄', '月次報告書', '各管理会社からの毎月のご報告・PDFで保存')}
+      ${item('#/notices', '🔔', 'お知らせ', 'ご提案・送金・報告書のお知らせ')}
+      ${item('#/menu/buildings', '🏢', '物件・契約', '物件の一覧と管理委託契約')}
+      ${item('#/menu/companies', '🔗', '管理会社', `つながっている会社 ${me.links.length}社・追加・お問い合わせ`)}
+    </div>
+    <button class="btn sub" id="out">ログアウト</button>
+    <p class="small muted">${esc(me.name)} 様でログイン中</p>`;
+  document.getElementById('out').onclick = () => logout(false);
+}
+
 // ---------- ルーティング ----------
 
 async function refreshBadge() {
   try {
-    const n = (await ownerApi('/proposals?status=sent')).length;
+    const n = (await api('/proposals?status=sent')).length;
     const b = document.getElementById('badge');
     b.hidden = !n; b.textContent = n;
-    const notes = await ownerApi('/notifications');
+    const notes = await api('/notifications');
     let seen = ''; try { seen = localStorage.getItem(KEY + ':seen') || ''; } catch { /* noop */ }
     document.getElementById('bellDot').hidden = !notes.some((x) => x.at > seen);
   } catch { /* noop */ }
 }
 
 async function route() {
-  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
-  const [page = 'home', arg] = parts;
+  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  const [page = 'home', a1, a2] = parts;
   const loggedIn = !!session;
   document.getElementById('tabs').hidden = !loggedIn;
   document.getElementById('bell').hidden = !loggedIn;
   if (!loggedIn) { if (page !== 'login') { location.hash = '#/login'; return; } return viewLogin(); }
   if (page === 'login') { location.hash = '#/home'; return; }
-  document.querySelectorAll('nav.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (page === 'reports' || page === 'notices' ? 'menu' : page)));
+  const tab = ['reports', 'notices'].includes(page) ? 'menu' : page;
+  document.querySelectorAll('nav.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   try {
-    if (!me) me = await api('/me');
-    if (page === 'proposals') await (arg ? viewProposal(arg) : viewProposals());
-    else if (page === 'money') await viewMoney(arg);
-    else if (page === 'reports') await (arg ? viewReport(arg) : viewReports());
+    if (!me) { me = await api('/me'); setHeader(); }
+    if (page === 'proposals') await (a1 && a2 ? viewProposal(a1, a2) : viewProposals());
+    else if (page === 'money') await viewMoney(a1);
+    else if (page === 'reports') await (a1 && a2 ? viewReport(a1, a2) : viewReports());
     else if (page === 'works') await viewWorks();
     else if (page === 'notices') await viewNotices();
-    else if (page === 'menu') viewMenu(arg);
+    else if (page === 'menu') viewMenu(a1);
     else await viewHome();
     refreshBadge();
   } catch (e) {
@@ -363,11 +410,9 @@ async function route() {
 }
 
 async function start() {
-  tenant = await api('/tenant');
-  // オーナーに見せる名前は管理会社の設定値（会社名＋サービス名）
-  document.getElementById('svc').textContent = tenant.ownerService;
-  document.getElementById('co').textContent = tenant.company;
-  document.title = `${tenant.ownerService}｜${tenant.company}`;
+  appInfo = await api('/app');
+  document.title = appInfo.name;
+  setHeader();
   window.addEventListener('hashchange', route);
   route();
 }

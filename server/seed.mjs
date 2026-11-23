@@ -2,35 +2,41 @@
 // 本番では REVO管理 の API から取得するため、このファイルは使わない。
 // 金額は REVO管理 側で計算済みの値として扱い、オーナー向けアプリ側では再計算しない。
 
-export const tenant = {
-  id: 'T-01',
-  company: '〇〇不動産管理株式会社',
-  ownerService: '博多オーナーズ',
-  tel: '092-000-0000',
-};
+// アプリの名前（仮）。オーナー自身が使うアプリなので、管理会社の名前ではなくアプリの名前を出す
+export const app = { name: 'オーナーズノート' };
 
-// 招待コード（管理会社が発行）→ オーナー
+// つながる管理会社（各社が REVO管理 を使っている想定）
+export const tenants = [
+  { id: 'T-01', company: '〇〇不動産管理株式会社', tel: '092-000-0000' },
+  { id: 'T-02', company: '△△ハウジング株式会社', tel: '092-111-1111' },
+];
+
+// 招待コード（各管理会社が発行）→ その会社でのオーナー
 export const invites = {
   'HKT-0001': { tenantId: 'T-01', ownerId: 'OW-01' },
   'HKT-0002': { tenantId: 'T-01', ownerId: 'OW-02' },
+  'TNJ-0011': { tenantId: 'T-02', ownerId: 'OW-11' },
 };
 
 export const MONTHS = ['2026-09', '2026-10', '2026-11'];
 export const closed = ['2026-09', '2026-10'];
 
 export const owners = [
-  { id: 'OW-01', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
-  { id: 'OW-02', name: '山本 恵子', kana: 'ヤマモト ケイコ', type: '個人' },
+  { id: 'OW-01', tenantId: 'T-01', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
+  { id: 'OW-02', tenantId: 'T-01', name: '山本 恵子', kana: 'ヤマモト ケイコ', type: '個人' },
+  { id: 'OW-11', tenantId: 'T-02', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
 ];
 
 export const buildings = [
   { id: 'BL-01', name: 'グランメゾン博多', ownerId: 'OW-01', address: '福岡市博多区博多駅南1-0-0', structure: 'RC', floors: 5, built: '2008-03' },
   { id: 'BL-02', name: 'ベルシティ大濠', ownerId: 'OW-01', address: '福岡市中央区荒戸2-0-0', structure: 'S', floors: 3, built: '2015-09' },
+  { id: 'BL-11', name: 'リバーサイド天神', ownerId: 'OW-11', address: '福岡市中央区天神4-0-0', structure: 'RC', floors: 4, built: '2012-02' },
   { id: 'BL-03', name: 'コーポ香椎', ownerId: 'OW-02', address: '福岡市東区香椎駅前3-0-0', structure: '木造', floors: 2, built: '1999-04' },
 ];
 
 export const mgmt = [
   { id: 'MG-01', ownerId: 'OW-01', rate: 0.05, remitDay: 25, start: '2024-04-01', end: '2027-03-31' },
+  { id: 'MG-11', ownerId: 'OW-11', rate: 0.04, remitDay: 27, start: '2023-10-01', end: '2027-09-30' },
   { id: 'MG-02', ownerId: 'OW-02', rate: 0.05, remitDay: 25, start: '2025-01-01', end: '2026-12-31' },
 ];
 
@@ -47,6 +53,10 @@ export const units = [
   ...rooms('BL-02', [
     ['101', 58000, 3000], ['102', 58000, 3000], ['201', 60000, 3000], ['202', 60000, 3000],
     ['203', 60000, 3000, '2026-11'], ['301', 62000, 3000], ['302', 62000, 3000], ['303', 62000, 3000],
+  ]),
+  ...rooms('BL-11', [
+    ['101', 88000, 6000], ['102', 88000, 6000], ['201', 90000, 6000], ['202', 90000, 6000, '2026-11'],
+    ['301', 92000, 6000], ['401', 120000, 8000],
   ]),
   ...rooms('BL-03', [
     ['101', 42000, 2000], ['102', 42000, 2000, '2026-08'], ['103', 42000, 2000],
@@ -65,6 +75,10 @@ export const expenses = [
   { buildingId: 'BL-02', month: '2026-09', kind: '清掃', amount: 15000 },
   { buildingId: 'BL-02', month: '2026-10', kind: '清掃', amount: 15000 },
   { buildingId: 'BL-02', month: '2026-11', kind: '清掃', amount: 15000 },
+  { buildingId: 'BL-11', month: '2026-09', kind: '清掃', amount: 18000 },
+  { buildingId: 'BL-11', month: '2026-10', kind: '清掃', amount: 18000 },
+  { buildingId: 'BL-11', month: '2026-10', kind: 'エレベーター点検', amount: 27500 },
+  { buildingId: 'BL-11', month: '2026-11', kind: '清掃', amount: 18000 },
   { buildingId: 'BL-03', month: '2026-09', kind: '清掃', amount: 11000 },
   { buildingId: 'BL-03', month: '2026-10', kind: '清掃', amount: 11000 },
   { buildingId: 'BL-03', month: '2026-10', kind: '共用灯 交換', amount: 6600 },
@@ -73,9 +87,9 @@ export const expenses = [
 
 // 未入金（部屋番号のみ）。11月は入金データ取込前のため多い。
 const unpaidRooms = {
-  '2026-09': { 'BL-01': [], 'BL-02': [], 'BL-03': ['203'] },
-  '2026-10': { 'BL-01': ['301'], 'BL-02': [], 'BL-03': [] },
-  '2026-11': { 'BL-01': ['101', '102', '201', '203', '301'], 'BL-02': ['101', '201', '202'], 'BL-03': ['101', '201'] },
+  '2026-09': { 'BL-01': [], 'BL-02': [], 'BL-03': ['203'], 'BL-11': [] },
+  '2026-10': { 'BL-01': ['301'], 'BL-02': [], 'BL-03': [], 'BL-11': [] },
+  '2026-11': { 'BL-01': ['101', '102', '201', '203', '301'], 'BL-02': ['101', '201', '202'], 'BL-03': ['101', '201'], 'BL-11': ['101', '301'] },
 };
 
 // 月の経過メモ（報告書用。入居者名は書かない）
@@ -83,6 +97,10 @@ export const reportNotes = {
   'OW-01': {
     '2026-09': ['グランメゾン博多 502号室 退去（9月末）。原状回復工事を手配しました。', '定期清掃（月2回）を実施しました。'],
     '2026-10': ['グランメゾン博多 202号室 退去（10月末）。募集を開始しました。', '消防設備点検を実施しました（指摘なし）。', '301号室の10月分賃料が未入金です。督促中です。'],
+  },
+  'OW-11': {
+    '2026-09': ['リバーサイド天神 全室入居中です。'],
+    '2026-10': ['エレベーターの定期点検を実施しました（指摘なし）。', '202号室から11月末の解約予告を受けました。'],
   },
   'OW-02': {
     '2026-09': ['コーポ香椎 203号室の9月分賃料が未入金でしたが、10月5日に入金を確認しました。'],
@@ -193,6 +211,11 @@ export const orders = [
     ],
     report: 'クロス全面張替え・床の部分補修を行いました。',
   },
+  {
+    id: 'OD-501', proposalId: null, ownerId: 'OW-11', buildingId: 'BL-11', title: '屋上防水の部分補修', contractor: '天神防水工業', amount: 185000,
+    status: '請書受領', history: [{ status: '発注済', at: '2026-11-12' }, { status: '請書受領', at: '2026-11-14' }],
+    photos: [], report: '',
+  },
 ];
 
 // 送金（REVO管理 の payouts の owner 行に相当）
@@ -206,10 +229,10 @@ export function buildRemittances() {
       const works = (worksByMonth[month] && worksByMonth[month][o.id]) || [];
       const worksTotal = works.reduce((s, w) => s + w.amount, 0);
       list.push({
-        id: `RM-${month}-${o.id}`, batchId: `PB-${month}`, month, date: `${month}-25`, status: '送金済', ownerId: o.id,
+        id: `RM-${month}-${o.id}`, batchId: `PB-${month}`, month, date: `${month}-${mgmt.find((m) => m.ownerId === o.id).remitDay}`, status: '送金済', ownerId: o.id, tenantId: o.tenantId,
         amount: pl.received - pl.fee - pl.expense - worksTotal,
         detail: { received: pl.received, fee: pl.fee, expense: pl.expense, works: worksTotal, worksOrders: works },
-        bank: o.id === 'OW-01' ? '福岡〇〇銀行 博多支店 普通 ****123' : '△△信用金庫 香椎支店 普通 ****456',
+        bank: { 'OW-01': '福岡〇〇銀行 博多支店 普通 ****123', 'OW-11': '福岡〇〇銀行 博多支店 普通 ****123' }[o.id] || '△△信用金庫 香椎支店 普通 ****456',
       });
     }
   }
