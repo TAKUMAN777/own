@@ -15,7 +15,7 @@ body {
   font-family: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "BIZ UDPGothic", Meiryo, sans-serif;
   background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.6;
   -webkit-font-smoothing: antialiased; -webkit-text-size-adjust: 100%;
-  padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  padding-bottom: calc(92px + env(safe-area-inset-bottom));
 }
 button { font: inherit; cursor: pointer; }
 a { color: var(--blue); }
@@ -23,12 +23,16 @@ a { color: var(--blue); }
 /* ---------- 上部 ---------- */
 .demo-banner { background: #7a5b17; color: #fff; font-size: 11.5px; text-align: center; padding: 3px 16px; }
 .top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  background: var(--head); color: #fff; padding: 9px 16px; }
-.brand { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
-.brand span { font-weight: 700; font-size: 15px; white-space: nowrap; }
-.brand small { opacity: .75; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.link { border: 0; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; padding: 5px 12px; font-size: 12.5px; white-space: nowrap; }
-.link:hover { background: rgba(255,255,255,.24); }
+  background: var(--head); color: #fff; padding: 10px 14px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; color: #fff; text-decoration: none; }
+.logo { width: 38px; height: 38px; flex-shrink: 0; }
+.bt { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.bt b { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt small { font-size: 12px; font-weight: 700; color: #e8b27a; letter-spacing: .08em; white-space: nowrap; }
+.iconbtn { position: relative; flex-shrink: 0; width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px;
+  background: rgba(255,255,255,.12); font-size: 22px; text-decoration: none; }
+.iconbtn:hover { background: rgba(255,255,255,.22); }
+.iconbtn i { position: absolute; top: 8px; right: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--head); }
 
 /* ---------- 本文 ---------- */
 main { max-width: 640px; margin: 0 auto; padding: 14px; outline: none; }
@@ -84,11 +88,11 @@ label.opt input:focus-visible + .card { outline: 3px solid var(--blue); outline-
 label.opt input:disabled + .card { opacity: .55; }
 
 /* 切り替え（青） */
-.seg { display: flex; background: #fff; border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; margin: 8px 0; }
-.seg button, .seg a { flex: 1; border: 0; background: transparent; padding: 8px 6px; color: var(--ink); font-size: 13px; text-align: center; text-decoration: none; }
-.seg > * + * { border-left: 1px solid #f0ebe3; }
-.seg .on { background: var(--blue); color: #fff; font-weight: 700; }
-.seg [disabled] { color: var(--idle); cursor: default; }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.seg button, .seg a { flex: 1; min-width: 84px; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 9px 8px;
+  color: var(--ink); font-size: 14px; text-align: center; text-decoration: none; box-shadow: var(--shadow); }
+.seg .on { background: #fff1de; border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.seg [disabled] { color: var(--idle); box-shadow: none; background: transparent; cursor: default; }
 
 /* 工事の段階 */
 .steps { list-style: none; padding: 0; margin: 10px 0 0; display: flex; gap: 2px; }
@@ -115,16 +119,43 @@ ul.plain { padding-left: 1.2em; margin: 4px 0; }
 .rooms .空室 { background: #fff3e2; color: #9a5b12; }
 .rooms .未入金 { background: #fde8e8; color: #c0392b; font-weight: 700; }
 
-/* ---------- 下のタブ ---------- */
-nav.tabs { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: var(--head);
-  padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); z-index: 5; }
-nav.tabs a { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 4px 0 5px; border-radius: 8px;
-  font-size: 10.5px; color: var(--head-ink); text-decoration: none; position: relative; }
-nav.tabs .ic { font-size: 18px; line-height: 1.25; }
-nav.tabs a.on { background: rgba(255,255,255,.16); color: #fff; font-weight: 700; }
-nav.tabs b { position: absolute; top: 1px; left: calc(50% + 7px); background: var(--accent); color: #fff; border-radius: 10px; font-size: 10px; min-width: 16px; padding: 0 5px; text-align: center; }
+/* ---------- ホーム ---------- */
+.hello { font-size: 18px; font-weight: 700; margin: 2px 2px 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; background: var(--panel); border-radius: 10px; padding: 7px 12px;
+  box-shadow: var(--shadow); color: var(--ink); text-decoration: none; font-size: 14px; }
+.chip .ic { font-size: 18px; line-height: 1; }
+.chip b { font-size: 18px; margin-left: 3px; font-variant-numeric: tabular-nums; }
+.chip small { font-size: 11px; color: var(--muted); }
+.btn.hero { padding: 14px 16px; font-size: 16px; border-radius: 12px; margin: 4px 0 12px; box-shadow: 0 3px 10px rgba(224,123,36,.3); }
 
-#toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: var(--head); color: #fff; padding: 9px 18px;
+/* ---------- メニュー ---------- */
+.menu { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.menu-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; color: var(--ink); text-decoration: none; }
+.menu-item + .menu-item { border-top: 1px solid #f0ebe3; }
+.menu-item:active { background: #fffaf3; }
+.menu-item .ic { font-size: 24px; width: 32px; text-align: center; }
+.menu-item b { display: block; font-size: 14.5px; }
+.menu-item small { display: block; font-size: 12px; color: var(--muted); }
+.menu-item > span:nth-child(2) { flex: 1; min-width: 0; }
+.menu-item .go { color: var(--idle); font-size: 22px; }
+
+/* ---------- 下のタブ ---------- */
+nav.tabs { position: fixed; bottom: 0; left: 0; right: 0; display: flex; align-items: flex-end; background: var(--panel);
+  border-top: 1px solid var(--line); padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); z-index: 5; }
+nav.tabs a { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0 5px; border-radius: 12px;
+  font-size: 11.5px; color: var(--muted); text-decoration: none; position: relative; }
+nav.tabs .ic { font-size: 24px; line-height: 1.15; }
+nav.tabs .ic.menu { color: var(--muted); font-size: 22px; }
+nav.tabs a.on { background: #fff1de; color: var(--accent); font-weight: 700; }
+nav.tabs a.center { padding-top: 0; }
+nav.tabs a.center .ic { width: 58px; height: 58px; margin-top: -30px; margin-bottom: 2px; border-radius: 50%; background: var(--accent);
+  display: grid; place-items: center; font-size: 28px; box-shadow: 0 4px 12px rgba(224,123,36,.4); border: 3px solid var(--panel); }
+nav.tabs a.center.on { background: transparent; }
+nav.tabs b { position: absolute; top: 2px; left: calc(50% + 8px); background: var(--ng); color: #fff; border-radius: 10px; font-size: 10.5px; min-width: 18px; padding: 0 5px; text-align: center; }
+nav.tabs a.center b { top: -30px; left: calc(50% + 14px); box-shadow: 0 0 0 2px var(--panel); }
+
+#toast { position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%); background: var(--head); color: #fff; padding: 9px 18px;
   border-radius: 10px; font-size: 13.5px; box-shadow: var(--shadow); opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 20; }
 #toast.show { opacity: 1; }
 

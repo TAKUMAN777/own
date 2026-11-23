@@ -13,16 +13,19 @@
 <body>
   <div class="demo-banner">デモ版：表示している物件・金額・写真はすべて架空のデータです</div>
   <header class="top">
-    <div class="brand"><span id="svc"></span><small id="co"></small></div>
-    <button id="logout" class="link" hidden>ログアウト</button>
+    <a class="brand" href="#/home">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><rect x="5" y="12" width="16" height="24" rx="1.5" fill="#fff"/><rect x="21" y="4" width="14" height="32" rx="1.5" fill="#e07b24"/><g fill="#233746"><rect x="9" y="16" width="3" height="3"/><rect x="14" y="16" width="3" height="3"/><rect x="9" y="22" width="3" height="3"/><rect x="14" y="22" width="3" height="3"/><rect x="11" y="29" width="4" height="7"/></g><g fill="#fff"><rect x="25" y="9" width="2.5" height="3"/><rect x="29.5" y="9" width="2.5" height="3"/><rect x="25" y="15" width="2.5" height="3"/><rect x="29.5" y="15" width="2.5" height="3"/><rect x="25" y="21" width="2.5" height="3"/><rect x="29.5" y="21" width="2.5" height="3"/></g></svg>
+      <span class="bt"><b id="co"></b><small id="svc"></small></span>
+    </a>
+    <a id="bell" class="iconbtn" href="#/notices" aria-label="お知らせ" hidden>🔔<i id="bellDot" hidden></i></a>
   </header>
   <main id="app" tabindex="-1"><p class="muted pad">読み込み中…</p></main>
   <nav class="tabs" id="tabs" hidden>
-    <a href="#/home" data-tab="home"><span class="ic">⌂</span>ホーム</a>
-    <a href="#/proposals" data-tab="proposals"><span class="ic">✓</span>ご提案<b id="badge" hidden></b></a>
-    <a href="#/money" data-tab="money"><span class="ic">¥</span>収支・送金</a>
-    <a href="#/reports" data-tab="reports"><span class="ic">▤</span>報告書</a>
-    <a href="#/works" data-tab="works"><span class="ic">⚒</span>工事</a>
+    <a href="#/home" data-tab="home"><span class="ic">🏠</span>ホーム</a>
+    <a href="#/works" data-tab="works"><span class="ic">🏗️</span>工事</a>
+    <a href="#/proposals" data-tab="proposals" class="center"><span class="ic">🤝</span>ご提案<b id="badge" hidden></b></a>
+    <a href="#/money" data-tab="money"><span class="ic">💴</span>収支</a>
+    <a href="#/menu" data-tab="menu"><span class="ic menu">☰</span>メニュー</a>
   </nav>
   <div id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>

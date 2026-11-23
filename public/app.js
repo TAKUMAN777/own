@@ -79,33 +79,66 @@ function viewLogin() {
 }
 
 async function viewHome() {
-  const [pending, months, rems, works, notes] = await Promise.all([
-    ownerApi('/proposals?status=sent'), api('/months'), ownerApi('/remittances'), ownerApi('/works'), ownerApi('/notifications'),
+  const [pending, months, rems, works] = await Promise.all([
+    ownerApi('/proposals?status=sent'), api('/months'), ownerApi('/remittances'), ownerApi('/works'),
   ]);
   const last = months.closed[months.closed.length - 1];
   const pl = await ownerApi(`/pl?month=${last}`);
   const rem = rems.find((r) => r.month === last);
   const active = works.filter((w) => w.status !== '支払済');
+  const chip = (href, ic, label, n, unit = '') => `<a class="chip" href="${href}"><span class="ic">${ic}</span>${label}<b>${n}</b>${unit ? `<small>${unit}</small>` : ''}</a>`;
   $app.innerHTML = `
-    <h1>${esc(me.name)} 様</h1>
-    ${pending.length ? `<a class="card attn" href="#/proposals/${esc(pending[0].id)}">
-        <div class="row"><strong>ご回答をお待ちしているご提案</strong><span class="pill warn">${pending.length}件</span></div>
-        <div class="small">${pending.map((p) => esc(p.title)).join('<br>')}</div></a>`
-      : '<div class="card"><strong>ご回答待ちのご提案はありません</strong></div>'}
-    <a class="card" href="#/money">
-      <div class="row"><span>${esc(ym(last))}分 ご送金額</span>${rem ? `<span class="pill ok">${esc(rem.status)}</span>` : ''}</div>
+    <div class="hello">${esc(me.name)} 様</div>
+    <div class="chips">
+      ${chip('#/menu/buildings', '🏢', '物件', me.buildings.length, '棟')}
+      ${chip('#/money', '🏠', '入居', `${pl.occupied}/${pl.units}`)}
+      ${chip('#/proposals', '🤝', '回答待ち', pending.length)}
+      ${chip('#/works', '🏗️', '工事中', active.length)}
+    </div>
+    ${pending.length
+      ? `<a class="btn hero" href="#/proposals/${esc(pending[0].id)}">▶ ご提案に回答する（${pending.length}件）</a>`
+      : `<a class="btn hero" href="#/reports/${esc(last)}">📄 ${Number(last.slice(5))}月の月次報告書を見る</a>`}
+    ${pending.map((p) => `<a class="card attn" href="#/proposals/${esc(p.id)}">
+        <div class="row"><strong>${esc(p.title)}</strong><span class="pill warn">ご回答待ち</span></div>
+        <div class="small muted">${esc(md(p.sentAt))}にお送りしました・${p.quotes.length}案からお選びください</div></a>`).join('')}
+    <a class="card" href="#/money/${esc(last)}">
+      <div class="row"><span>💴 ${esc(ym(last))}分 ご送金額</span>${rem ? `<span class="pill ok">${esc(rem.status)}</span>` : ''}</div>
       <div class="big num">${rem ? yen(rem.amount) : '—'}</div>
-      <div class="small muted">入居 ${pl.occupied}／${pl.units}室　${rem ? `送金日 ${esc(ymd(rem.date))}` : ''}</div>
+      <div class="small muted">${rem ? `送金日 ${esc(ymd(rem.date))}` : ''}</div>
     </a>
     <a class="card" href="#/works">
-      <div class="row"><strong>進行中の工事</strong><span class="pill info">${active.length}件</span></div>
+      <div class="row"><strong>🏗️ 進行中の工事</strong><span class="pill info">${active.length}件</span></div>
       ${active.map((w) => `<div class="small">${esc(w.title)}：${esc(w.status)}</div>`).join('') || '<div class="small muted">ありません</div>'}
-    </a>
-    <h2>物件</h2>
-    ${me.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}／${esc(b.structure)}造 ${b.floors}階建／${b.units}室</div></div>`).join('')}
-    ${notes.length ? `<h2>お知らせ</h2>${notes.map((n) => `<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="card small"><div class="muted">${esc(md(n.at))}</div>${esc(n.title)}</${n.link ? 'a' : 'div'}>`).join('')}` : ''}
-    <h2>管理委託契約</h2>
-    ${me.mgmt.map((m) => `<div class="card small">管理料 入金額の${(m.rate * 100).toFixed(1)}%／毎月${m.remitDay}日送金<br>契約期間 ${esc(ymd(m.start))}〜${esc(ymd(m.end))}</div>`).join('')}`;
+    </a>`;
+}
+
+async function viewNotices() {
+  const notes = await ownerApi('/notifications');
+  try { localStorage.setItem(KEY + ':seen', new Date().toISOString()); } catch { /* noop */ }
+  document.getElementById('bellDot').hidden = true;
+  $app.innerHTML = `<h1>🔔 お知らせ</h1>${notes.map((n) => `<${n.link ? `a href="${esc(n.link)}"` : 'div'} class="card small"><div class="muted">${esc(md(n.at))}</div>${esc(n.title)}</${n.link ? 'a' : 'div'}>`).join('') || '<div class="card muted">新しいお知らせはありません</div>'}`;
+}
+
+function viewMenu(arg) {
+  if (arg === 'buildings') {
+    $app.innerHTML = `<p><a href="#/menu">← メニュー</a></p><h1>🏢 物件・契約</h1>
+      ${me.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}<br>${esc(b.structure)}造 ${b.floors}階建／${b.units}室／${esc(b.built.replace('-', '年'))}月築</div></div>`).join('')}
+      <h2>管理委託契約</h2>
+      ${me.mgmt.map((m) => `<div class="card small">管理料 入金額の${(m.rate * 100).toFixed(1)}%／毎月${m.remitDay}日送金<br>契約期間 ${esc(ymd(m.start))}〜${esc(ymd(m.end))}</div>`).join('')}`;
+    return;
+  }
+  const item = (href, ic, t, sub) => `<a class="menu-item" href="${href}"><span class="ic">${ic}</span><span><b>${t}</b><small>${sub}</small></span><span class="go">›</span></a>`;
+  $app.innerHTML = `
+    <h1>メニュー</h1>
+    <div class="menu">
+      ${item('#/reports', '📄', '月次報告書', '毎月の収支とご報告・PDFで保存')}
+      ${item('#/notices', '🔔', 'お知らせ', 'ご提案・送金・報告書のお知らせ')}
+      ${item('#/menu/buildings', '🏢', '物件・契約', '物件の一覧と管理委託契約')}
+      ${item(`tel:${esc(tenant.tel)}`, '📞', 'お問い合わせ', `${esc(tenant.company)}　${esc(tenant.tel)}`)}
+    </div>
+    <button class="btn sub" id="out">ログアウト</button>
+    <p class="small muted">${esc(me.name)} 様でログイン中</p>`;
+  document.getElementById('out').onclick = () => logout(false);
 }
 
 async function viewProposals() {
@@ -235,6 +268,7 @@ async function viewMoney(month) {
         <tr><td>費用${b.expenses.length ? `<div class="muted">${b.expenses.map((e) => `${esc(e.kind)} ${yen(e.amount)}`).join('／')}</div>` : ''}</td><td class="r num">−${yen(b.expense)}</td></tr>
         <tr class="total"><td>差引</td><td class="r num">${yen(b.remit)}</td></tr>
       </table></div>`).join('')}
+    <a class="btn sub" href="#/reports/${esc(m)}">📄 ${Number(m.slice(5))}月の月次報告書を見る</a>
     <p class="small muted">月締めが終わった月の数字を表示しています。</p>`;
 }
 
@@ -297,6 +331,9 @@ async function refreshBadge() {
     const n = (await ownerApi('/proposals?status=sent')).length;
     const b = document.getElementById('badge');
     b.hidden = !n; b.textContent = n;
+    const notes = await ownerApi('/notifications');
+    let seen = ''; try { seen = localStorage.getItem(KEY + ':seen') || ''; } catch { /* noop */ }
+    document.getElementById('bellDot').hidden = !notes.some((x) => x.at > seen);
   } catch { /* noop */ }
 }
 
@@ -305,16 +342,18 @@ async function route() {
   const [page = 'home', arg] = parts;
   const loggedIn = !!session;
   document.getElementById('tabs').hidden = !loggedIn;
-  document.getElementById('logout').hidden = !loggedIn;
+  document.getElementById('bell').hidden = !loggedIn;
   if (!loggedIn) { if (page !== 'login') { location.hash = '#/login'; return; } return viewLogin(); }
   if (page === 'login') { location.hash = '#/home'; return; }
-  document.querySelectorAll('nav.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === page));
+  document.querySelectorAll('nav.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (page === 'reports' || page === 'notices' ? 'menu' : page)));
   try {
     if (!me) me = await api('/me');
     if (page === 'proposals') await (arg ? viewProposal(arg) : viewProposals());
     else if (page === 'money') await viewMoney(arg);
     else if (page === 'reports') await (arg ? viewReport(arg) : viewReports());
     else if (page === 'works') await viewWorks();
+    else if (page === 'notices') await viewNotices();
+    else if (page === 'menu') viewMenu(arg);
     else await viewHome();
     refreshBadge();
   } catch (e) {
@@ -325,11 +364,10 @@ async function route() {
 
 async function start() {
   tenant = await api('/tenant');
-  // オーナーに見せる名前は「サービス名｜管理会社名」
+  // オーナーに見せる名前は管理会社の設定値（会社名＋サービス名）
   document.getElementById('svc').textContent = tenant.ownerService;
   document.getElementById('co').textContent = tenant.company;
   document.title = `${tenant.ownerService}｜${tenant.company}`;
-  document.getElementById('logout').onclick = () => logout(false);
   window.addEventListener('hashchange', route);
   route();
 }
