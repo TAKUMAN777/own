@@ -24,13 +24,31 @@ const ymd = (s) => { const [y, m, d] = s.slice(0, 10).split('-'); return `${y}�
 const enc = encodeURIComponent;
 const co = (x) => `<span class="co">${esc(x.company)}</span>`;
 
+// 確認のダイアログ（画面の中に出す）。OK なら true
+function ask(msg, ok = 'はい') {
+  return new Promise((resolve) => {
+    const d = document.createElement('div');
+    d.className = 'ask';
+    d.innerHTML = `<div class="ask-box" role="dialog" aria-modal="true"><p>${esc(msg)}</p><div class="ask-btns"><button type="button" class="btn sub" data-a="0">やめる</button><button type="button" class="btn" data-a="1">${esc(ok)}</button></div></div>`;
+    const done = (v) => { d.remove(); resolve(v); };
+    d.onclick = (e) => { if (e.target === d) done(false); const a = e.target.closest('[data-a]'); if (a) done(a.dataset.a === '1'); };
+    document.body.appendChild(d);
+    d.querySelector('[data-a="1"]').focus();
+  });
+}
+
 function toast(msg) {
+  if (msg === 'stale') return;
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
+// 画面を移ったあとに、前の画面の読み込みが終わっても描かない（読み込みの番号で見分ける）
+let navSeq = 0;
+
 async function api(path, opts = {}) {
+  const seq = navSeq;
   const res = await fetch(`/api/v1${path}`, {
     method: opts.method || 'GET',
     headers: { 'content-type': 'application/json', ...(session ? { authorization: `Bearer ${session.token}` } : {}) },
@@ -39,6 +57,7 @@ async function api(path, opts = {}) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && session && path !== '/auth/invite') { logout(true); throw new Error('ログインの有効期限が切れました'); }
   if (!res.ok) { const e = new Error(data.message || 'エラーが発生しました'); e.code = data.error; throw e; }
+  if ((opts.method || 'GET') === 'GET' && seq !== navSeq) { const e = new Error('stale'); e.stale = true; throw e; }
   return data;
 }
 
@@ -219,7 +238,7 @@ async function viewProposal(tenantId, id) {
     const q = p.quotes.find((x) => x.id === quoteId);
     const msg = decision === 'return' ? `${p.company}へ、このご提案を差戻します。よろしいですか？`
       : `${letters[p.quoteIds.indexOf(quoteId)]}案（${q.contractor}・${yen(q.total)}）を${DECISION[decision]}します。よろしいですか？`;
-    if (!confirm(msg)) return;
+    if (!(await ask(msg))) return;
     const btn = document.getElementById('go');
     btn.disabled = true; err.textContent = '';
     try {
@@ -576,7 +595,7 @@ async function viewAssetForm(mode, id) {
         <p class="small muted">Excelの場合は「CSV」で保存してから選んでください。入居者の氏名・電話などの列は読み込みません。</p>
         <label>部屋一覧（レントロール）<input type="file" id="csv-rooms" accept=".csv,.txt,text/csv"></label>
         <label>収支（送金明細・入出金の一覧）<input type="file" id="csv-ledger" accept=".csv,.txt,text/csv"></label>
-        <div class="small">見本：<a href="#" data-sample="rooms">部屋一覧.csv</a>／<a href="#" data-sample="ledger">収支.csv</a></div>
+        <div class="small">資料がなければ見本で試せます：<button type="button" class="btn sub small" data-sample="rooms">部屋一覧の見本</button> <button type="button" class="btn sub small" data-sample="ledger">収支の見本</button></div>
         <div id="csv-result"></div>
       </div>` : ''}
     <form id="af">
@@ -601,11 +620,11 @@ async function viewAssetForm(mode, id) {
         ${r.ignored.length ? `<br>読み込まなかった列：${r.ignored.map(esc).join('、')}` : ''}
         ${r.errors.length ? `<br><span class="neg">${r.errors.slice(0, 5).map(esc).join('<br>')}${r.errors.length > 5 ? `<br>ほか${r.errors.length - 5}件` : ''}</span>` : ''}</div>`);
     };
-    const load = async (input) => {
-      const f = input.files[0];
-      if (!f) return;
-      const r = detect(parseCSV(decode(await f.arrayBuffer())));
-      show(f.name, r);
+    const load = async (input, sample) => {
+      const f = sample ? null : input.files[0];
+      if (!f && !sample) return;
+      const r = detect(parseCSV(sample ? SAMPLES[sample] : decode(await f.arrayBuffer())));
+      show(sample ? (sample === 'rooms' ? '部屋一覧の見本' : '収支の見本') : f.name, r);
       if (r.kind === 'rooms') {
         document.querySelector('.rooms-ed tbody').innerHTML = '';
         const tmp = roomsEditor(r.items);
@@ -619,15 +638,7 @@ async function viewAssetForm(mode, id) {
     };
     document.getElementById('csv-rooms').onchange = (e) => load(e.target);
     document.getElementById('csv-ledger').onchange = (e) => load(e.target);
-    document.querySelectorAll('[data-sample]').forEach((a) => {
-      a.onclick = (e) => {
-        e.preventDefault();
-        const k = a.dataset.sample;
-        const url = URL.createObjectURL(new Blob(['﻿' + SAMPLES[k]], { type: 'text/csv' }));
-        Object.assign(document.createElement('a'), { href: url, download: k === 'rooms' ? '部屋一覧_見本.csv' : '収支_見本.csv' }).click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-      };
-    });
+    document.querySelectorAll('[data-sample]').forEach((b) => { b.onclick = () => load(null, b.dataset.sample); });
   }
 
   document.getElementById('af').onsubmit = async (e) => {
@@ -761,14 +772,14 @@ async function viewAsset(id, pane = 'now') {
     const r = detect(parseCSV(decode(await f.arrayBuffer())));
     const res = document.getElementById('l-res');
     if (r.kind !== 'ledger' || !r.items.length) { res.innerHTML = `<p class="err">${esc(r.errors[0] || '収支の資料として読めませんでした')}</p>`; return; }
-    if (!confirm(`${r.items.length}件（${[...new Set(r.items.map((i) => ym(i.month)))].join('・')}）を取り込みます。よろしいですか？${r.errors.length ? `\n読めなかった行：${r.errors.length}件` : ''}`)) return;
+    if (!(await ask(`${r.items.length}件（${[...new Set(r.items.map((i) => ym(i.month)))].join('・')}）を取り込みます。よろしいですか？${r.errors.length ? `\n読めなかった行：${r.errors.length}件` : ''}`))) return;
     try { await api(`/assets/${enc(id)}/ledger`, { method: 'POST', body: { source: 'import', entries: r.items } }); toast(`${r.items.length}件を取り込みました`); viewAsset(id); } catch (ex) { res.innerHTML = `<p class="err">${esc(ex.message)}</p>`; }
   };
   $app.querySelectorAll('[data-del]').forEach((b) => {
-    b.onclick = async () => { if (!confirm('この記録を削除しますか？')) return; await api(`/assets/${enc(id)}/ledger/${enc(b.dataset.del)}`, { method: 'DELETE' }); viewAsset(id); };
+    b.onclick = async () => { if (!(await ask('この記録を削除しますか？', '削除する'))) return; await api(`/assets/${enc(id)}/ledger/${enc(b.dataset.del)}`, { method: 'DELETE' }); viewAsset(id); };
   });
   document.getElementById('del').onclick = async () => {
-    if (!confirm(`「${x.name}」と、その収支の記録を削除します。よろしいですか？`)) return;
+    if (!(await ask(`「${x.name}」と、その収支の記録を削除します。よろしいですか？`, '削除する'))) return;
     await api(`/assets/${enc(id)}`, { method: 'DELETE' });
     toast('削除しました'); location.hash = '#/assets';
   };
@@ -813,6 +824,7 @@ async function refreshBadge() {
 }
 
 async function route() {
+  navSeq++;
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   const [page = 'home', a1, a2, a3] = parts;
   const loggedIn = !!session;
@@ -840,6 +852,7 @@ async function route() {
     else await viewHome();
     refreshBadge();
   } catch (e) {
+    if (e.stale) return;
     if (session) $app.innerHTML = `<div class="card"><p class="err">${esc(e.message)}</p><a href="#/home">ホームへ戻る</a></div>`;
   }
   window.scrollTo(0, 0);

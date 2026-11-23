@@ -160,7 +160,9 @@ const TOTAL = 180;
   await tap('a[href^="#/proposals/T-01/PR-301"]');
   await page.waitForTimeout(1500); await scroll(330); await page.waitForTimeout(1500);
   await tap('#go');
-  await page.waitForTimeout(2500); await scroll(0);
+  await page.waitForTimeout(900);
+  await tap('.ask [data-a="1"]');
+  await page.waitForTimeout(1600); await scroll(0);
   await until(159);
 
   // ---- 13：資料から・自主管理 ----
@@ -169,9 +171,9 @@ const TOTAL = 180;
   await go('#/assets/new/import');
   await inject();
   await page.waitForTimeout(800);
-  await F().locator('#csv-rooms').setInputFiles(path.join(DIR, '..', 'rooms.csv'));
-  await page.waitForTimeout(1500);
-  await F().locator('#csv-ledger').setInputFiles(path.join(DIR, '..', 'ledger.csv'));
+  await tap('[data-sample="rooms"]');
+  await page.waitForTimeout(900);
+  await tap('[data-sample="ledger"]');
   await page.waitForTimeout(1500); await scroll(560);
   await until(168);
 

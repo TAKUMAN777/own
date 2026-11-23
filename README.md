@@ -35,6 +35,11 @@ npm test           # API とルールの自動確認
 ```
 Node.js 20 以上。依存パッケージはありません。
 
+## サーバーなしの公開デモ
+```bash
+node scripts/build-static.mjs   # dist/revo-asset.html（1枚で動く。データはページの中だけ、再読み込みで初期状態）
+```
+
 ## 構成
 - `public/` 画面（ビルド不要の静的JS、ハッシュルーティング）
 - `server/server.mjs` 静的配信と API（`/api/v1`）

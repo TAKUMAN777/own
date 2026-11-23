@@ -5,7 +5,6 @@
 ```bash
 PORT=8791 npm start                         # 別のターミナルで（初期データの状態で）
 cd scripts/video
-cp ../../path/to/rooms.csv ../../path/to/ledger.csv ..   # 資料取込の場面で使う見本CSV（public/csv.js の SAMPLES）
 node record.cjs                             # 収録（約3分）→ raw/*.webm と timeline.json
 python3 music.py timeline.json audio.wav    # BGM・タップ音・場面転換の音
 ffmpeg -i raw/*.webm -i audio.wav -t 180 -c:v libx264 -crf 20 -pix_fmt yuv420p -r 30 \
