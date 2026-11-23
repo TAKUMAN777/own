@@ -19,13 +19,13 @@
 
 | メソッド・パス | 中身 |
 |---|---|
-| `GET /app` | `{ name, demo }` アプリ名（設定値） |
+| `GET /app` | `{ name, systems, demo }` アプリ名（設定値）と、連携できる管理システムの名前 |
 | `POST /auth/invite` | `{ code }` → `{ token, accountId }`。初回はアカウントを作る。つながっている会社のコードなら同じアカウントに入る。5回間違えると1分待ち |
 | `POST /auth/logout` | トークンを無効にする |
-| `GET /me` | `{ name, links: [{ tenantId, company, tel, ownerId, buildings, mgmt }] }` |
+| `GET /me` | `{ name, links: [{ tenantId, company, tel, system, ownerId, buildings, mgmt }] }` |
 | `POST /links` | `{ code }` 管理会社を追加。同じ会社は `409 already_linked`、別アカウントで使用済みは `409 in_use` |
 | `GET /months` | `{ months, closed }` |
-| `GET /pl?month=YYYY-MM` | `{ total, companies: [{ tenantId, company, pl }] }`。締め前の会社は `pl: null`、`total` は締め済みの会社の和 |
+| `GET /pl?month=YYYY-MM` | `{ total, companies: [{ tenantId, company, pl }], own: [...] }`。締め前の会社は `pl: null`、`total` は締め済みの会社の和。`own` は自主管理・資料の資産のその月の記録 |
 | `GET /proposals?status=sent` | つながっている全社の提案（`quotes` 埋め込み） |
 | `GET /companies/{tenantId}/proposals/{id}` | 提案1件 |
 | `POST /companies/{tenantId}/proposals/{id}/respond` | `{ decision: approve｜conditional｜return, quoteId, comment }` |
@@ -35,6 +35,24 @@
 | `GET /works` | 全社の工事（段階・経過・写真） |
 | `GET /notifications` | お知らせ |
 | `GET /photos/{photoId}.svg?t=<token>` | 工事写真（つながっている会社の、本人の工事のみ） |
+| `GET /assets` | `{ summary, list }` 資産の一覧と合計（取得額・借入残高・満室想定年間賃料・入居・表面利回り） |
+| `GET /assets/{id}` | 資産1件（部屋・指標 `kpi`・月ごとの収支 `monthly`・記録 `ledger`・工事） |
+| `POST /assets` | `{ source: self｜import, company?, name, address, structure, floors, built, rooms, finance, ledger? }` 資料から／自主管理で作る |
+| `PATCH /assets/{id}` | 自分で作った資産：基本情報・部屋・finance。連携の建物：finance だけ |
+| `DELETE /assets/{id}` | 自分で作った資産だけ削除できる |
+| `POST /assets/{id}/ledger` | `{ month, type: income｜expense, category, amount }` または `{ source: 'import', entries: [...] }`（1行でも不正なら全部取り込まない） |
+| `DELETE /assets/{id}/ledger/{entryId}` | 記録を削除 |
+
+### 資産の作り方
+| source | 作り方 | 建物・部屋・収支 | 取得価格・借入・税・保険 |
+|---|---|---|---|
+| `link` | 管理システム（REVO管理・REVO MANAGER）と連携 | 管理会社のデータ（変更不可）。収支は締め済みの月 | オーナーが入力 |
+| `import` | 管理会社の資料（CSV）から | 資料から読んだ値。あとで編集できる | オーナーが入力 |
+| `self` | 自主管理で入力 | オーナーが入力 | オーナーが入力 |
+
+- 部屋は `{ no, layout, rent, fee, status: 入居中｜空室 }` だけを保存する（入居者の情報は受け取らない）
+- 指標：表面利回り＝満室想定年間賃料÷取得価格、実質利回り（見込み）＝（いまの入居での年間賃料−年間運営費の見込み）÷取得価格。
+  運営費の見込み＝（連携：締め済みの月の管理料＋費用の平均、それ以外：記録した支出の月平均）×12＋固定資産税＋保険料
 
 ### 回答のルール（REVO管理 の `ownerRespond` と同じ）
 - 回答できるのは `status: sent` の提案だけ。二重回答は `409 already_answered`
@@ -45,7 +63,8 @@
 
 ## 2. 管理会社（REVO管理）との連動
 
-### 2-1. 各社の REVO管理 に用意してほしい API（このサーバーが呼ぶ）
+### 2-1. 各社の管理システム（REVO管理・REVO MANAGER）に用意してほしい API（このサーバーが呼ぶ）
+REVO MANAGER（承認・精算・送金）は、少なくとも物件・部屋・月の収支・送金を同じ形で返す。
 会社ごとに、つながったオーナー（`ownerId`）の分だけを返す。
 
 | メソッド・パス | 中身 | REVO管理 側の元データ |

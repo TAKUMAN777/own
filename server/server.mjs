@@ -28,7 +28,7 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     let size = 0;
     for await (const c of req) {
       size += c.length;
-      if (size > 256 * 1024) throw new HttpError(413, 'too_large', 'データが大きすぎます');
+      if (size > 2 * 1024 * 1024) throw new HttpError(413, 'too_large', 'データが大きすぎます');
       chunks.push(c);
     }
     const raw = Buffer.concat(chunks).toString('utf8');
@@ -56,7 +56,7 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     const seg = p.split('/').filter(Boolean).map(decodeURIComponent);
     const M = req.method;
 
-    if (M === 'GET' && p === '/app') return send(res, 200, { name: store.app().name, demo: true });
+    if (M === 'GET' && p === '/app') return send(res, 200, { name: store.app().name, systems: store.systems(), demo: true });
 
     if (M === 'POST' && p === '/auth/invite') {
       const ip = req.socket.remoteAddress || '';
@@ -107,6 +107,16 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     if (M === 'GET' && p === '/reports') return send(res, 200, store.reports(A));
     if (M === 'GET' && p === '/works') return send(res, 200, store.works(A));
     if (M === 'GET' && p === '/notifications') return send(res, 200, store.notifications(A));
+    // 資産（建物）
+    if (seg[0] === 'assets') {
+      if (seg.length === 1 && M === 'GET') return send(res, 200, store.assets(A));
+      if (seg.length === 1 && M === 'POST') return send(res, 200, store.createAsset(A, (await readBody(req)).json()));
+      if (seg.length === 2 && M === 'GET') return send(res, 200, store.asset(A, seg[1]));
+      if (seg.length === 2 && M === 'PATCH') return send(res, 200, store.updateAsset(A, seg[1], (await readBody(req)).json()));
+      if (seg.length === 2 && M === 'DELETE') return send(res, 200, store.deleteAsset(A, seg[1]));
+      if (seg.length === 3 && seg[2] === 'ledger' && M === 'POST') return send(res, 200, store.addLedger(A, seg[1], (await readBody(req)).json()));
+      if (seg.length === 4 && seg[2] === 'ledger' && M === 'DELETE') return send(res, 200, store.deleteLedger(A, seg[1], seg[3]));
+    }
     // 管理会社ごとのデータ：/companies/{tenantId}/...
     if (seg[0] === 'companies' && seg[1]) {
       if (M === 'GET' && seg[2] === 'proposals' && seg[3] && seg.length === 4) return send(res, 200, store.proposal(A, seg[1], seg[3]));

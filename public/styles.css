@@ -174,3 +174,34 @@ nav.tabs a.center b { top: -30px; left: calc(50% + 14px); box-shadow: 0 0 0 2px 
   .card { box-shadow: none; border: 1px solid #ccc; }
   main { max-width: none; }
 }
+
+/* ---------- 資産 ---------- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 6px 0; }
+.kpi { background: var(--soft); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+.kpi .kk { font-size: 11px; color: var(--muted); }
+.kpi .kv2 { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .kv2 small { font-size: 11px; font-weight: 400; color: var(--muted); }
+.src { display: inline-block; font-size: 11.5px; border-radius: 4px; padding: 1px 7px; font-weight: 700; margin: 2px 0 4px; }
+.src.link { background: #e8f1fa; color: #1d5fa8; }
+.src.import { background: #fff1de; color: #9a5b12; }
+.src.self { background: #e6efe9; color: #2b7a45; }
+.card h3 { margin: 0 0 6px; font-size: 14px; }
+label { display: block; margin-bottom: 8px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.row3 { display: grid; grid-template-columns: 1.2fr 1fr 1.4fr; gap: 0 8px; }
+.unit { display: flex; align-items: center; gap: 4px; }
+.unit input { flex: 1; min-width: 0; }
+.unit i { font-style: normal; font-size: 12px; color: var(--muted); margin-top: 3px; }
+input[type=month], input[type=file] { display: block; width: 100%; margin-top: 3px; font: inherit; font-size: 16px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
+input[type=file] { font-size: 13px; padding: 7px; }
+.tablewrap { overflow-x: auto; margin: 0 -4px; }
+table.grid th { background: var(--th); font-size: 11.5px; font-weight: 700; padding: 5px 4px; }
+table.grid td { padding: 3px 2px; border-bottom: 0; }
+.rooms-ed input, .rooms-ed select { margin: 0; padding: 7px 6px; font-size: 15px; min-width: 52px; }
+.rooms-ed select { min-width: 64px; padding-right: 2px; }
+.rooms-ed td:nth-child(3) input, .rooms-ed td:nth-child(4) input { min-width: 72px; }
+button.x { border: 0; background: #f3eee6; color: var(--muted); border-radius: 50%; width: 28px; height: 28px; padding: 0; font-size: 15px; }
+button.x:hover { background: #fde8e8; color: var(--ng); }
+.btn.small { display: inline-block; width: auto; padding: 6px 12px; font-size: 13px; font-weight: 400; }
+th { color: var(--muted); font-size: 12px; }

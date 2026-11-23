@@ -7,8 +7,9 @@ export const app = { name: 'オーナーズノート' };
 
 // つながる管理会社（各社が REVO管理 を使っている想定）
 export const tenants = [
-  { id: 'T-01', company: '〇〇不動産管理株式会社', tel: '092-000-0000' },
-  { id: 'T-02', company: '△△ハウジング株式会社', tel: '092-111-1111' },
+  { id: 'T-01', company: '〇〇不動産管理株式会社', tel: '092-000-0000', system: 'REVO管理' },
+  { id: 'T-02', company: '△△ハウジング株式会社', tel: '092-111-1111', system: 'REVO管理' },
+  { id: 'T-03', company: '□□管理サービス株式会社', tel: '092-222-2222', system: 'REVO MANAGER' },
 ];
 
 // 招待コード（各管理会社が発行）→ その会社でのオーナー
@@ -16,6 +17,7 @@ export const invites = {
   'HKT-0001': { tenantId: 'T-01', ownerId: 'OW-01' },
   'HKT-0002': { tenantId: 'T-01', ownerId: 'OW-02' },
   'TNJ-0011': { tenantId: 'T-02', ownerId: 'OW-11' },
+  'MGR-0021': { tenantId: 'T-03', ownerId: 'OW-21' },
 };
 
 export const MONTHS = ['2026-09', '2026-10', '2026-11'];
@@ -25,18 +27,21 @@ export const owners = [
   { id: 'OW-01', tenantId: 'T-01', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
   { id: 'OW-02', tenantId: 'T-01', name: '山本 恵子', kana: 'ヤマモト ケイコ', type: '個人' },
   { id: 'OW-11', tenantId: 'T-02', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
+  { id: 'OW-21', tenantId: 'T-03', name: '田中 靖夫', kana: 'タナカ ヤスオ', type: '個人' },
 ];
 
 export const buildings = [
   { id: 'BL-01', name: 'グランメゾン博多', ownerId: 'OW-01', address: '福岡市博多区博多駅南1-0-0', structure: 'RC', floors: 5, built: '2008-03' },
   { id: 'BL-02', name: 'ベルシティ大濠', ownerId: 'OW-01', address: '福岡市中央区荒戸2-0-0', structure: 'S', floors: 3, built: '2015-09' },
   { id: 'BL-11', name: 'リバーサイド天神', ownerId: 'OW-11', address: '福岡市中央区天神4-0-0', structure: 'RC', floors: 4, built: '2012-02' },
+  { id: 'BL-21', name: 'メゾン六本松', ownerId: 'OW-21', address: '福岡市中央区六本松1-0-0', structure: '木造', floors: 2, built: '2004-06' },
   { id: 'BL-03', name: 'コーポ香椎', ownerId: 'OW-02', address: '福岡市東区香椎駅前3-0-0', structure: '木造', floors: 2, built: '1999-04' },
 ];
 
 export const mgmt = [
   { id: 'MG-01', ownerId: 'OW-01', rate: 0.05, remitDay: 25, start: '2024-04-01', end: '2027-03-31' },
   { id: 'MG-11', ownerId: 'OW-11', rate: 0.04, remitDay: 27, start: '2023-10-01', end: '2027-09-30' },
+  { id: 'MG-21', ownerId: 'OW-21', rate: 0.05, remitDay: 20, start: '2025-04-01', end: '2028-03-31' },
   { id: 'MG-02', ownerId: 'OW-02', rate: 0.05, remitDay: 25, start: '2025-01-01', end: '2026-12-31' },
 ];
 
@@ -57,6 +62,9 @@ export const units = [
   ...rooms('BL-11', [
     ['101', 88000, 6000], ['102', 88000, 6000], ['201', 90000, 6000], ['202', 90000, 6000, '2026-11'],
     ['301', 92000, 6000], ['401', 120000, 8000],
+  ]),
+  ...rooms('BL-21', [
+    ['101', 52000, 3000], ['102', 52000, 3000], ['201', 54000, 3000], ['202', 54000, 3000, '2026-10'],
   ]),
   ...rooms('BL-03', [
     ['101', 42000, 2000], ['102', 42000, 2000, '2026-08'], ['103', 42000, 2000],
@@ -79,6 +87,9 @@ export const expenses = [
   { buildingId: 'BL-11', month: '2026-10', kind: '清掃', amount: 18000 },
   { buildingId: 'BL-11', month: '2026-10', kind: 'エレベーター点検', amount: 27500 },
   { buildingId: 'BL-11', month: '2026-11', kind: '清掃', amount: 18000 },
+  { buildingId: 'BL-21', month: '2026-09', kind: '清掃', amount: 8800 },
+  { buildingId: 'BL-21', month: '2026-10', kind: '清掃', amount: 8800 },
+  { buildingId: 'BL-21', month: '2026-11', kind: '清掃', amount: 8800 },
   { buildingId: 'BL-03', month: '2026-09', kind: '清掃', amount: 11000 },
   { buildingId: 'BL-03', month: '2026-10', kind: '清掃', amount: 11000 },
   { buildingId: 'BL-03', month: '2026-10', kind: '共用灯 交換', amount: 6600 },
@@ -87,9 +98,9 @@ export const expenses = [
 
 // 未入金（部屋番号のみ）。11月は入金データ取込前のため多い。
 const unpaidRooms = {
-  '2026-09': { 'BL-01': [], 'BL-02': [], 'BL-03': ['203'], 'BL-11': [] },
-  '2026-10': { 'BL-01': ['301'], 'BL-02': [], 'BL-03': [], 'BL-11': [] },
-  '2026-11': { 'BL-01': ['101', '102', '201', '203', '301'], 'BL-02': ['101', '201', '202'], 'BL-03': ['101', '201'], 'BL-11': ['101', '301'] },
+  '2026-09': { 'BL-01': [], 'BL-02': [], 'BL-03': ['203'], 'BL-11': [], 'BL-21': [] },
+  '2026-10': { 'BL-01': ['301'], 'BL-02': [], 'BL-03': [], 'BL-11': [], 'BL-21': [] },
+  '2026-11': { 'BL-01': ['101', '102', '201', '203', '301'], 'BL-02': ['101', '201', '202'], 'BL-03': ['101', '201'], 'BL-11': ['101', '301'], 'BL-21': ['101'] },
 };
 
 // 月の経過メモ（報告書用。入居者名は書かない）
@@ -232,9 +243,32 @@ export function buildRemittances() {
         id: `RM-${month}-${o.id}`, batchId: `PB-${month}`, month, date: `${month}-${mgmt.find((m) => m.ownerId === o.id).remitDay}`, status: '送金済', ownerId: o.id, tenantId: o.tenantId,
         amount: pl.received - pl.fee - pl.expense - worksTotal,
         detail: { received: pl.received, fee: pl.fee, expense: pl.expense, works: worksTotal, worksOrders: works },
-        bank: { 'OW-01': '福岡〇〇銀行 博多支店 普通 ****123', 'OW-11': '福岡〇〇銀行 博多支店 普通 ****123' }[o.id] || '△△信用金庫 香椎支店 普通 ****456',
+        bank: { 'OW-01': '福岡〇〇銀行 博多支店 普通 ****123', 'OW-11': '福岡〇〇銀行 博多支店 普通 ****123', 'OW-21': '福岡〇〇銀行 博多支店 普通 ****123' }[o.id] || '△△信用金庫 香椎支店 普通 ****456',
       });
     }
   }
   return list;
 }
+
+// オーナーが自分で入れる情報（デモ用の初期値）。アカウントを作ったときに入る
+// finance：取得価格・借入・固定資産税・保険（年額）。管理会社のシステムにはない、オーナー自身の情報
+export const ownerDemo = {
+  'OW-01': {
+    finance: {
+      'BL-01': { price: 145000000, acquired: '2016-04', loanBalance: 82000000, loanRate: 1.2, loanMonthly: 420000, propertyTax: 980000, insurance: 120000 },
+      'BL-02': { price: 98000000, acquired: '2019-10', loanBalance: 71000000, loanRate: 0.9, loanMonthly: 310000, propertyTax: 620000, insurance: 80000 },
+    },
+    assets: [
+      {
+        source: 'self', company: '', name: '田中邸 貸家', address: '福岡市南区大橋2-0-0', structure: '木造', floors: 2, built: '1995-03',
+        rooms: [{ no: '1F', layout: '2DK', rent: 75000, fee: 0, status: '入居中' }, { no: '2F', layout: '2DK', rent: 72000, fee: 0, status: '入居中' }],
+        finance: { price: 18000000, acquired: '2010-06', loanBalance: 0, loanRate: 0, loanMonthly: 0, propertyTax: 140000, insurance: 45000 },
+        ledger: [
+          ['2026-09', 'income', '賃料', 147000], ['2026-09', 'expense', '草刈り', 8000],
+          ['2026-10', 'income', '賃料', 147000], ['2026-10', 'expense', '給湯器修理', 22000],
+          ['2026-11', 'income', '賃料', 147000],
+        ],
+      },
+    ],
+  },
+};

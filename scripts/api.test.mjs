@@ -170,15 +170,108 @@ test('写真はつながっている会社の、本人の工事のものだけ',
   assert.equal((await fetch(`${base}/photos/ph-290-1.svg`)).status, 404);
 });
 
-test('画面に管理システム（REVO）の名前を出さない', () => {
+test('管理システムの名前は画面のコードに書かず、データから出す', () => {
   for (const f of ['public/index.html', 'public/app.js', 'public/styles.css']) {
     const src = fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
       .split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
-    assert.ok(!/revo|レボ/i.test(src), `${f} に REVO の名前があります`);
+    assert.ok(!/\bREVO\b|レボ/.test(src), `${f} に管理システムの名前が直接書かれています`);
   }
 });
 
 test('静的配信：パスの外は読めない', async () => {
   const r = await fetch(`${base}/..%2fpackage.json`);
   assert.notEqual(r.status, 200);
+});
+
+// ---------- 資産 ----------
+test('資産：連携・自主管理の建物が並び、合計と利回りが合う', async () => {
+  const t = await login('HKT-0001');
+  const { summary, list } = (await call('/assets', { token: t })).body;
+  assert.ok(list.some((x) => x.source === 'link' && x.system === 'REVO管理'));
+  assert.ok(list.some((x) => x.source === 'self'));
+  assert.equal(summary.count, list.length);
+  assert.equal(summary.price, list.reduce((s, x) => s + x.finance.price, 0));
+  assert.equal(summary.units, list.reduce((s, x) => s + x.kpi.units, 0));
+  for (const x of list) {
+    assert.equal(x.kpi.fullYear, x.rooms.reduce((s, r) => s + (r.rent + r.fee) * 12, 0));
+    if (x.finance.price) assert.equal(x.kpi.grossYield, x.kpi.fullYear / x.finance.price);
+  }
+  // 連携の建物の月ごとの収支は、管理会社の計算（pl）と一致
+  const link = list.find((x) => x.source === 'link');
+  const d = (await call(`/assets/${link.id}`, { token: t })).body;
+  const pl = (await call('/pl?month=2026-10', { token: t })).body;
+  const b = pl.companies.find((c) => c.tenantId === link.tenantId).pl.buildings.find((v) => v.buildingId === link.buildingId);
+  const m = d.monthly.find((v) => v.month === '2026-10');
+  assert.equal(m.income, b.received);
+  assert.equal(m.net, b.remit);
+});
+
+test('資産：REVO MANAGER の会社ともつながる', async () => {
+  const t = await login('HKT-0001');
+  const me = await call('/links', { token: t, method: 'POST', body: { code: 'MGR-0021' } });
+  assert.equal(me.status, 200);
+  const { list } = (await call('/assets', { token: t })).body;
+  assert.ok(list.some((x) => x.system === 'REVO MANAGER' && x.name === 'メゾン六本松'));
+});
+
+test('資産：資料から作る・自主管理で入力・収支の記録・削除', async () => {
+  const t = await login('HKT-0002');
+  assert.equal((await call('/assets', { token: t, method: 'POST', body: { source: 'self', name: '' } })).status, 400);
+  const created = await call('/assets', {
+    token: t, method: 'POST', body: {
+      source: 'import', company: '別の管理会社', name: 'テスト荘', finance: { price: '20,000,000' },
+      rooms: [{ no: '101', rent: 50000, fee: 2000, status: '入居中', tenantName: '入居者 太郎', tel: '090' }, { no: '102', rent: 50000, status: '空室' }],
+      ledger: [{ month: '2026-10', type: 'income', category: '賃料', amount: 52000 }, { month: '2026-10', type: 'expense', category: '管理料', amount: 2600 }],
+    },
+  });
+  assert.equal(created.status, 200);
+  const a = created.body;
+  assert.equal(a.finance.price, 20000000);
+  // 入居者の情報は保存しない
+  assert.deepEqual(Object.keys(a.rooms[0]).sort(), ['fee', 'layout', 'no', 'rent', 'status']);
+  assert.equal(a.kpi.grossYield, (52000 + 50000) * 12 / 20000000);
+  assert.deepEqual(a.monthly, [{ month: '2026-10', income: 52000, expense: 2600, net: 49400 }]);
+  // 収支の取込：1行でも不正なら全部取り込まない
+  assert.equal((await call(`/assets/${a.id}/ledger`, { token: t, method: 'POST', body: { entries: [{ month: '2026-11', type: 'income', category: '賃料', amount: 1 }, { month: '2026-13', type: 'income', category: 'x', amount: 1 }] } })).status, 400);
+  const added = await call(`/assets/${a.id}/ledger`, { token: t, method: 'POST', body: { source: 'import', entries: [{ month: '2026-11', type: 'income', category: '賃料', amount: 52000 }] } });
+  assert.equal(added.body.ledger.length, 3);
+  // 収支・送金の画面にも出る
+  const pl = (await call('/pl?month=2026-10', { token: t })).body;
+  assert.equal(pl.own.find((o) => o.assetId === a.id).net, 49400);
+  // 他の人の資産は見られない
+  const t1 = await login('HKT-0001');
+  assert.equal((await call(`/assets/${a.id}`, { token: t1 })).status, 404);
+  // 連携の建物は取得価格だけ変えられ、削除はできない
+  const link = (await call('/assets', { token: t })).body.list.find((x) => x.source === 'link');
+  const upd = await call(`/assets/${link.id}`, { token: t, method: 'PATCH', body: { name: '名前変更', finance: { price: 50000000 } } });
+  assert.equal(upd.body.name, link.name);
+  assert.equal(upd.body.finance.price, 50000000);
+  assert.equal((await call(`/assets/${link.id}`, { token: t, method: 'DELETE' })).status, 404);
+  assert.equal((await call(`/assets/${a.id}`, { token: t, method: 'DELETE' })).status, 200);
+  assert.equal((await call(`/assets/${a.id}`, { token: t })).status, 404);
+});
+
+test('資料の読み込み：部屋一覧・収支・Shift_JIS、入居者名の列は読まない', async () => {
+  const { decode, parseCSV, detect, SAMPLES, normMonth } = await import('../public/csv.js');
+  const rooms = detect(parseCSV(SAMPLES.rooms));
+  assert.equal(rooms.kind, 'rooms');
+  assert.equal(rooms.items.length, 4);
+  assert.deepEqual(rooms.ignored, ['入居者名']);
+  assert.ok(rooms.items.every((r) => !Object.values(r).includes('（読み込みません）')));
+  assert.equal(rooms.items[1].status, '空室');
+  const led = detect(parseCSV(SAMPLES.ledger));
+  assert.equal(led.kind, 'ledger');
+  assert.deepEqual(led.items[0], { month: '2026-09', type: 'income', category: '賃料', amount: 190000, room: '' });
+  assert.equal(led.items[1].type, 'expense');
+  // 入金・出金の2列、カンマ付き金額、引用符
+  const two = detect(parseCSV('日付,摘要,入金,出金\n2026/10/25,"家賃 10月分","152,000",\n2026年10月,修繕,,"33,000"\n'));
+  assert.deepEqual(two.items.map((i) => [i.month, i.type, i.amount]), [['2026-10', 'income', 152000], ['2026-10', 'expense', 33000]]);
+  assert.equal(normMonth('2026年1月'), '2026-01');
+  assert.equal(normMonth('foo'), '');
+  // Shift_JIS（Excel の CSV）
+  const sjis = Buffer.from([0x95, 0x94, 0x89, 0xae, 0x2c, 0x92, 0xc0, 0x97, 0xbf, 0x0a, 0x31, 0x30, 0x31, 0x2c, 0x35, 0x30, 0x30, 0x30, 0x30, 0x0a]); // 部屋,賃料 / 101,50000
+  const r2 = detect(parseCSV(decode(sjis)));
+  assert.equal(r2.kind, 'rooms');
+  assert.equal(r2.items[0].rent, 50000);
+  assert.equal(detect(parseCSV('a,b\n1,2')).kind, null);
 });

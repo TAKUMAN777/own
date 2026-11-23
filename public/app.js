@@ -2,6 +2,8 @@
 // - オーナーのアカウントに、複数の管理会社がつながる。データの正は各社の管理システム。
 // - 金額は各社の計算結果をそのまま表示し、ここでは再計算しない（会社をまたぐ合計はサーバーで出す）。
 // - 入居者の個人情報は扱わない（部屋番号まで）。
+import { decode, parseCSV, detect, SAMPLES } from './csv.js';
+
 const $app = document.getElementById('app');
 const KEY = 'owner-app-session-v2';
 let appInfo = null;
@@ -92,19 +94,19 @@ function viewLogin() {
 }
 
 async function viewHome() {
-  const [pending, months, rems, works] = await Promise.all([
-    api('/proposals?status=sent'), api('/months'), api('/remittances'), api('/works'),
+  const [pending, months, rems, works, assets] = await Promise.all([
+    api('/proposals?status=sent'), api('/months'), api('/remittances'), api('/works'), api('/assets'),
   ]);
+  const as = assets.summary;
   const last = months.closed[months.closed.length - 1];
   const pl = await api(`/pl?month=${last}`);
   const monthRems = rems.filter((r) => r.month === last);
   const active = works.filter((w) => w.status !== '支払済');
-  const nb = me.links.reduce((s, l) => s + l.buildings.length, 0);
   const chip = (href, ic, label, n, unit = '') => `<a class="chip" href="${href}"><span class="ic">${ic}</span>${label}<b>${n}</b>${unit ? `<small>${unit}</small>` : ''}</a>`;
   $app.innerHTML = `
     <div class="chips">
-      ${chip('#/menu/buildings', '🏢', '物件', nb, '棟')}
-      ${chip('#/money', '🏠', '入居', pl.total ? `${pl.total.occupied}/${pl.total.units}` : '—')}
+      ${chip('#/assets', '🏢', '資産', as.count, '件')}
+      ${chip('#/assets', '🏠', '入居', `${as.occupied}/${as.units}`)}
       ${chip('#/proposals', '🤝', '回答待ち', pending.length)}
       ${chip('#/works', '🏗️', '工事中', active.length)}
       ${chip('#/menu/companies', '🔗', '管理会社', me.links.length, '社')}
@@ -119,6 +121,14 @@ async function viewHome() {
       <div class="row"><span>💴 ${esc(ym(last))}分 ご送金の合計</span>${monthRems.length ? `<span class="pill ok">${monthRems.length}社 送金済</span>` : ''}</div>
       <div class="big num">${monthRems.length ? yen(monthRems.reduce((s, r) => s + r.amount, 0)) : '—'}</div>
       ${monthRems.map((r) => `<div class="row small"><span>${co(r)}</span><span class="num">${yen(r.amount)}（${esc(md(r.date))}）</span></div>`).join('')}
+    </a>
+    <a class="card" href="#/assets">
+      <div class="row"><strong>🏢 資産</strong><span class="small muted">${as.count}件</span></div>
+      <div class="kpis">
+        <div class="kpi"><div class="kk">取得額の合計</div><div class="kv2">${man(as.price)}</div></div>
+        <div class="kpi"><div class="kk">借入残高</div><div class="kv2">${man(as.loanBalance)}</div></div>
+        <div class="kpi"><div class="kk">表面利回り</div><div class="kv2">${pct(as.grossYield)}</div></div>
+      </div>
     </a>
     <a class="card" href="#/works">
       <div class="row"><strong>🏗️ 進行中の工事</strong><span class="pill info">${active.length}件</span></div>
@@ -266,7 +276,13 @@ async function viewMoney(month) {
         <table class="small">${plRows(b)}</table></div>`).join('') : '<div class="card muted">この月はまだ締めていません</div>'}
       <a class="btn sub" href="#/reports/${enc(tenantId)}/${esc(m)}">📄 ${Number(m.slice(5))}月の月次報告書</a>`;
     }).join('')}
-    <p class="small muted">月締めが終わった月の数字を、各管理会社の計算どおりに表示しています。</p>`;
+    ${pl.own.length ? `<h2>✍️ 自主管理・資料から作った資産</h2>${pl.own.map((o) => `<a class="card" href="#/assets/${enc(o.assetId)}">
+      <div class="row"><strong>${esc(o.name)}</strong>${o.source === 'import' ? `<span class="small muted">📄 ${esc(o.company || '資料')}</span>` : '<span class="small muted">✍️ 自主管理</span>'}</div>
+      <table class="small">
+        ${o.entries.map((e) => `<tr><td>${esc(e.category)}</td><td class="r num ${e.type === 'expense' ? 'neg' : ''}">${e.type === 'expense' ? '−' : ''}${yen(e.amount)}</td></tr>`).join('')}
+        <tr class="total"><td>差引</td><td class="r num">${yen(o.net)}</td></tr>
+      </table></a>`).join('')}` : ''}
+    <p class="small muted">管理会社の分は、月締めが終わった月の数字を各社の計算どおりに表示しています。自主管理・資料の分は、ご自身の記録です。</p>`;
 }
 
 async function viewReports() {
@@ -333,16 +349,16 @@ async function viewNotices() {
 function viewMenu(arg) {
   const back = '<p><a href="#/menu">← メニュー</a></p>';
   if (arg === 'buildings') {
-    $app.innerHTML = `${back}<h1>🏢 物件・契約</h1>
+    $app.innerHTML = `${back}<h1>📑 管理委託契約</h1>
       ${me.links.map((l) => `<h2>🔗 ${esc(l.company)}</h2>
-        ${l.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}<br>${esc(b.structure)}造 ${b.floors}階建／${b.units}室／${esc(b.built.replace('-', '年'))}月築</div></div>`).join('')}
+        ${l.buildings.map((b) => `<div class="card"><strong>${esc(b.name)}</strong><div class="small muted">${esc(b.address)}<br>${esc(b.structure)}造 ${b.floors}階建／${b.units}室／${esc(b.built.slice(0, 4))}年${Number(b.built.slice(5))}月築</div></div>`).join('')}
         ${l.mgmt.map((m) => `<div class="card small">管理委託契約：管理料 入金額の${(m.rate * 100).toFixed(1)}%／毎月${m.remitDay}日送金<br>契約期間 ${esc(ymd(m.start))}〜${esc(ymd(m.end))}</div>`).join('')}`).join('')}`;
     return;
   }
   if (arg === 'companies') {
     $app.innerHTML = `${back}<h1>🔗 管理会社</h1>
       <p class="small muted">物件の管理を任せている会社です。各社からのご提案・送金・報告書がこのアプリに届きます。</p>
-      <div class="menu">${me.links.map((l) => `<a class="menu-item" href="tel:${esc(l.tel)}"><span class="ic">🏢</span><span><b>${esc(l.company)}</b><small>物件 ${l.buildings.length}棟／📞 ${esc(l.tel)}</small></span><span class="go">›</span></a>`).join('')}</div>
+      <div class="menu">${me.links.map((l) => `<a class="menu-item" href="tel:${esc(l.tel)}"><span class="ic">🏢</span><span><b>${esc(l.company)}</b><small>🔗 ${esc(l.system)}と連携／物件 ${l.buildings.length}棟／📞 ${esc(l.tel)}</small></span><span class="go">›</span></a>`).join('')}</div>
       <h2>＋ 管理会社を追加</h2>
       <p class="small">追加したい管理会社から届いた招待コードを入力してください。</p>
       ${codeForm('lk', 'つなげる')}`;
@@ -360,15 +376,298 @@ function viewMenu(arg) {
   $app.innerHTML = `
     <h1>☰ メニュー</h1>
     <div class="menu">
+      ${item('#/assets', '🏢', '資産', '建物・部屋・利回り・借入。資料や自主管理からも作れます')}
+      ${item('#/works', '🏗️', '工事', '工事の進み具合と完了の写真')}
       ${item('#/reports', '📄', '月次報告書', '各管理会社からの毎月のご報告・PDFで保存')}
       ${item('#/notices', '🔔', 'お知らせ', 'ご提案・送金・報告書のお知らせ')}
-      ${item('#/menu/buildings', '🏢', '物件・契約', '物件の一覧と管理委託契約')}
+      ${item('#/menu/buildings', '📑', '管理委託契約', '管理会社ごとの物件と契約')}
       ${item('#/menu/companies', '🔗', '管理会社', `つながっている会社 ${me.links.length}社・追加・お問い合わせ`)}
     </div>
     <button class="btn sub" id="out">ログアウト</button>
     <p class="small muted">${esc(me.name)} 様でログイン中</p>`;
   document.getElementById('out').onclick = () => logout(false);
 }
+
+// ---------- 資産（建物） ----------
+
+const pct = (x) => (x == null ? '—' : `${(x * 100).toFixed(2)}%`);
+const man = (n) => (n ? `${(n / 10000).toLocaleString('ja-JP', { maximumFractionDigits: 0 })}万円` : '—');
+const srcBadge = (x) => (x.source === 'link' ? `<span class="src link">🔗 ${esc(x.system)}と連携</span>`
+  : x.source === 'import' ? `<span class="src import">📄 ${esc(x.company || '管理会社')}の資料から</span>`
+    : '<span class="src self">✍️ 自主管理</span>');
+
+async function viewAssets() {
+  const { summary: s, list } = await api('/assets');
+  $app.innerHTML = `
+    <h1>🏢 資産</h1>
+    <div class="card">
+      <div class="kpis">
+        <div class="kpi"><div class="kk">資産</div><div class="kv2">${s.count}<small>件</small></div></div>
+        <div class="kpi"><div class="kk">取得額の合計</div><div class="kv2">${man(s.price)}</div></div>
+        <div class="kpi"><div class="kk">借入残高</div><div class="kv2">${man(s.loanBalance)}</div></div>
+        <div class="kpi"><div class="kk">満室想定 年間賃料</div><div class="kv2">${man(s.fullYear)}</div></div>
+        <div class="kpi"><div class="kk">入居</div><div class="kv2">${s.occupied}/${s.units}<small> ${pct(s.occRate).replace(/\.\d+/, '')}</small></div></div>
+        <div class="kpi"><div class="kk">表面利回り</div><div class="kv2">${pct(s.grossYield)}</div></div>
+      </div>
+      ${s.missingPrice ? `<div class="small muted">取得価格が未入力の資産が${s.missingPrice}件あります（利回りの計算から外しています）</div>` : ''}
+    </div>
+    <a class="btn hero" href="#/assets/new">＋ 資産を追加する</a>
+    ${list.map((x) => `<a class="card" href="#/assets/${enc(x.id)}">
+      <div class="row"><strong>${esc(x.name)}</strong><span class="small num">${x.kpi.occupied}/${x.kpi.units}室</span></div>
+      <div>${srcBadge(x)}</div>
+      <div class="small muted">${esc(x.address)}</div>
+      <div class="row small"><span>満室想定 ${man(x.kpi.fullYear)}／年</span><span>表面 ${pct(x.kpi.grossYield)}</span></div>
+    </a>`).join('')}`;
+}
+
+function viewAssetNew() {
+  const opt = (href, ic, t, sub) => `<a class="menu-item" href="${href}"><span class="ic">${ic}</span><span><b>${t}</b><small>${sub}</small></span><span class="go">›</span></a>`;
+  $app.innerHTML = `
+    <p><a href="#/assets">← 資産</a></p>
+    <h1>＋ 資産を追加</h1>
+    <p class="small">物件の管理のしかたに合わせて選んでください。</p>
+    <div class="menu">
+      ${opt('#/menu/companies', '🔗', '管理システムと連携する', `管理会社が${esc(appInfo.systems.join('・'))}を使っている場合。招待コードを入れると、物件・部屋・収支が自動で届きます`)}
+      ${opt('#/assets/new/import', '📄', '管理会社の資料から作る', '送金明細・部屋一覧（レントロール）のCSVを読み込みます')}
+      ${opt('#/assets/new/self', '✍️', '自主管理で入力する', '物件・部屋・毎月の収入と支出を自分で入力します')}
+    </div>`;
+}
+
+function roomsEditor(rooms) {
+  const row = (r = {}) => `<tr>
+    <td><input type="text" name="no" value="${esc(r.no || '')}" placeholder="101"></td>
+    <td><input type="text" name="layout" value="${esc(r.layout || '')}" placeholder="1K"></td>
+    <td><input type="text" name="rent" inputmode="numeric" value="${r.rent ?? ''}" placeholder="58000"></td>
+    <td><input type="text" name="fee" inputmode="numeric" value="${r.fee ?? ''}" placeholder="3000"></td>
+    <td><select name="status" aria-label="状態"><option value="入居中" ${r.status !== '空室' ? 'selected' : ''}>入居</option><option value="空室" ${r.status === '空室' ? 'selected' : ''}>空室</option></select></td>
+    <td><button type="button" class="x" aria-label="この部屋を削除">×</button></td></tr>`;
+  return {
+    html: `<div class="tablewrap"><table class="grid rooms-ed"><thead><tr><th>部屋</th><th>間取り</th><th>賃料</th><th>共益費</th><th>状態</th><th></th></tr></thead>
+      <tbody>${(rooms.length ? rooms : [{}]).map(row).join('')}</tbody></table></div>
+      <button type="button" class="btn sub small" id="addRoom">＋ 部屋を追加</button>`,
+    bind() {
+      const tb = document.querySelector('.rooms-ed tbody');
+      document.getElementById('addRoom').onclick = () => tb.insertAdjacentHTML('beforeend', row());
+      tb.onclick = (e) => { if (e.target.classList.contains('x')) e.target.closest('tr').remove(); };
+    },
+    read() {
+      return [...document.querySelectorAll('.rooms-ed tbody tr')].map((tr) => {
+        const v = (n) => tr.querySelector(`[name=${n}]`).value.trim();
+        return { no: v('no'), layout: v('layout'), rent: v('rent'), fee: v('fee'), status: v('status') };
+      }).filter((r) => r.no);
+    },
+  };
+}
+
+function basicFields(x = {}) {
+  return `
+    <label>物件名（必須）<input type="text" id="a-name" value="${esc(x.name || '')}" placeholder="例：メゾン大橋"></label>
+    <label>所在地<input type="text" id="a-address" value="${esc(x.address || '')}"></label>
+    <div class="row3">
+      <label>構造<select id="a-structure">${['', 'RC', 'SRC', 'S', '木造', '軽量鉄骨'].map((v) => `<option ${x.structure === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+      <label>階数<input type="text" id="a-floors" inputmode="numeric" value="${x.floors || ''}"></label>
+      <label>築年月<input type="month" id="a-built" value="${esc(x.built || '')}"></label>
+    </div>`;
+}
+const readBasic = () => ({
+  name: document.getElementById('a-name').value, address: document.getElementById('a-address').value,
+  structure: document.getElementById('a-structure').value, floors: document.getElementById('a-floors').value, built: document.getElementById('a-built').value,
+});
+
+function financeFields(f = {}) {
+  const inp = (k, label, ph, unit = '円') => `<label>${label}<span class="unit"><input type="text" inputmode="decimal" id="f-${k}" value="${f[k] || ''}" placeholder="未入力"><i>${unit}</i></span></label>`;
+  return `<div class="row2">
+    ${inp('price', '取得価格', '98000000')}
+    <label>取得年月<input type="month" id="f-acquired" value="${esc(f.acquired || '')}"></label>
+    ${inp('loanBalance', '借入残高', '71000000')}
+    ${inp('loanRate', '金利', '0.9', '%')}
+    ${inp('loanMonthly', '毎月の返済額', '310000')}
+    ${inp('propertyTax', '固定資産税（年）', '620000')}
+    ${inp('insurance', '保険料（年）', '80000')}
+  </div>`;
+}
+const readFinance = () => Object.fromEntries(['price', 'acquired', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance'].map((k) => [k, document.getElementById(`f-${k}`).value]));
+
+async function viewAssetForm(mode, id) {
+  // mode: 'self' | 'import'（新規）／ 'edit'（自分で作った資産の編集）
+  const x = mode === 'edit' ? await api(`/assets/${enc(id)}`) : { source: mode, rooms: [], finance: {} };
+  const isImport = x.source === 'import';
+  const re = roomsEditor(x.rooms);
+  let ledger = [];
+  $app.innerHTML = `
+    <p><a href="${mode === 'edit' ? `#/assets/${enc(id)}` : '#/assets/new'}">← 戻る</a></p>
+    <h1>${mode === 'edit' ? '基本情報・部屋を編集' : isImport ? '📄 管理会社の資料から作る' : '✍️ 自主管理で入力する'}</h1>
+    ${isImport && mode !== 'edit' ? `
+      <div class="card">
+        <h3>資料を読み込む（CSV）</h3>
+        <p class="small muted">Excelの場合は「CSV」で保存してから選んでください。入居者の氏名・電話などの列は読み込みません。</p>
+        <label>部屋一覧（レントロール）<input type="file" id="csv-rooms" accept=".csv,.txt,text/csv"></label>
+        <label>収支（送金明細・入出金の一覧）<input type="file" id="csv-ledger" accept=".csv,.txt,text/csv"></label>
+        <div class="small">見本：<a href="#" data-sample="rooms">部屋一覧.csv</a>／<a href="#" data-sample="ledger">収支.csv</a></div>
+        <div id="csv-result"></div>
+      </div>` : ''}
+    <form id="af">
+      <div class="card">
+        ${isImport ? `<label>管理会社の名前<input type="text" id="a-company" value="${esc(x.company || '')}" placeholder="例：〇〇不動産"></label>` : ''}
+        ${basicFields(x)}
+      </div>
+      <h2>部屋</h2>
+      <div class="card">${re.html}</div>
+      ${mode !== 'edit' ? `<h2>取得・借入・税（わかる範囲で）</h2><div class="card">${financeFields(x.finance)}</div>` : ''}
+      <div class="err" id="err"></div>
+      <button class="btn">${mode === 'edit' ? '保存する' : 'この内容で登録する'}</button>
+    </form>`;
+  re.bind();
+
+  if (isImport && mode !== 'edit') {
+    const out = document.getElementById('csv-result');
+    const show = (title, r) => {
+      const kind = r.kind === 'rooms' ? '部屋一覧' : r.kind === 'ledger' ? '収支' : '';
+      out.insertAdjacentHTML('beforeend', `<div class="notice" style="margin-top:8px">
+        <b>${esc(title)}</b>：${kind ? `${kind}として ${r.items.length}行を読み込みました` : '読み込めませんでした'}
+        ${r.ignored.length ? `<br>読み込まなかった列：${r.ignored.map(esc).join('、')}` : ''}
+        ${r.errors.length ? `<br><span class="neg">${r.errors.slice(0, 5).map(esc).join('<br>')}${r.errors.length > 5 ? `<br>ほか${r.errors.length - 5}件` : ''}</span>` : ''}</div>`);
+    };
+    const load = async (input) => {
+      const f = input.files[0];
+      if (!f) return;
+      const r = detect(parseCSV(decode(await f.arrayBuffer())));
+      show(f.name, r);
+      if (r.kind === 'rooms') {
+        document.querySelector('.rooms-ed tbody').innerHTML = '';
+        const tmp = roomsEditor(r.items);
+        document.querySelector('.rooms-ed').closest('.card').innerHTML = tmp.html; tmp.bind();
+        re.read = tmp.read;
+      } else if (r.kind === 'ledger') {
+        ledger = r.items;
+        const months = [...new Set(ledger.map((e) => e.month))].sort();
+        out.insertAdjacentHTML('beforeend', `<div class="small muted">収支：${months.map(ym).join('・')}（${ledger.length}件）を一緒に登録します</div>`);
+      }
+    };
+    document.getElementById('csv-rooms').onchange = (e) => load(e.target);
+    document.getElementById('csv-ledger').onchange = (e) => load(e.target);
+    document.querySelectorAll('[data-sample]').forEach((a) => {
+      a.onclick = (e) => {
+        e.preventDefault();
+        const k = a.dataset.sample;
+        const url = URL.createObjectURL(new Blob(['﻿' + SAMPLES[k]], { type: 'text/csv' }));
+        Object.assign(document.createElement('a'), { href: url, download: k === 'rooms' ? '部屋一覧_見本.csv' : '収支_見本.csv' }).click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+    });
+  }
+
+  document.getElementById('af').onsubmit = async (e) => {
+    e.preventDefault();
+    const err = document.getElementById('err');
+    const body = { ...readBasic(), rooms: re.read() };
+    if (!body.name.trim()) { err.textContent = '物件名を入力してください'; return; }
+    if (isImport) body.company = document.getElementById('a-company').value;
+    try {
+      let r;
+      if (mode === 'edit') r = await api(`/assets/${enc(id)}`, { method: 'PATCH', body });
+      else r = await api('/assets', { method: 'POST', body: { ...body, source: x.source, finance: readFinance(), ledger } });
+      toast(mode === 'edit' ? '保存しました' : '資産を登録しました');
+      location.hash = `#/assets/${enc(r.id)}`;
+    } catch (ex) { err.textContent = ex.message; }
+  };
+}
+
+async function viewAsset(id) {
+  const x = await api(`/assets/${enc(id)}`);
+  const k = x.kpi;
+  const own = x.source !== 'link';
+  $app.innerHTML = `
+    <p><a href="#/assets">← 資産</a></p>
+    <h1>${esc(x.name)}</h1>
+    <div>${srcBadge(x)}</div>
+    <div class="small muted">${esc(x.address)}${x.structure ? `／${esc(x.structure)}造` : ''}${x.floors ? ` ${x.floors}階建` : ''}${x.built ? `／${esc(x.built.slice(0, 4))}年${Number(x.built.slice(5))}月築` : ''}</div>
+    <div class="card">
+      <div class="kpis">
+        <div class="kpi"><div class="kk">入居</div><div class="kv2">${k.occupied}/${k.units}<small>室</small></div></div>
+        <div class="kpi"><div class="kk">満室想定 年間賃料</div><div class="kv2">${man(k.fullYear)}</div></div>
+        <div class="kpi"><div class="kk">表面利回り</div><div class="kv2">${pct(k.grossYield)}</div></div>
+        <div class="kpi"><div class="kk">実質利回り（見込み）</div><div class="kv2">${pct(k.netYield)}</div></div>
+        <div class="kpi"><div class="kk">借入残高</div><div class="kv2">${man(x.finance.loanBalance)}</div></div>
+        <div class="kpi"><div class="kk">年間返済</div><div class="kv2">${man(k.loanYear)}</div></div>
+      </div>
+      <div class="small muted">実質利回り（見込み）＝（いまの入居での年間賃料 − 年間の運営費の見込み${man(k.annualCost) !== '—' ? ` ${man(k.annualCost)}` : ''}）÷ 取得価格。運営費は${own ? '入力・取込した支出の月平均' : '締め済みの月の管理料・費用の平均'}×12＋固定資産税＋保険料。</div>
+    </div>
+
+    <h2>部屋</h2>
+    <div class="card"><table class="small">
+      <tr><th>部屋</th><th>間取り</th><th class="r">賃料＋共益費</th><th class="r">状態</th></tr>
+      ${x.rooms.map((r) => `<tr><td>${esc(r.no)}</td><td>${esc(r.layout || '—')}</td><td class="r num">${yen(r.rent + r.fee)}</td><td class="r"><span class="pill ${r.status === '空室' ? 'warn' : 'ok'}">${esc(r.status)}</span></td></tr>`).join('') || '<tr><td colspan="4" class="muted">部屋が登録されていません</td></tr>'}
+    </table>${own ? `<a class="btn sub" href="#/assets/${enc(id)}/edit">基本情報・部屋を編集</a>` : `<div class="small muted">部屋と入居状況は${esc(x.company)}のデータです（${esc(ym(seedClosedLabel()))}末時点）。</div>`}</div>
+
+    <h2>月ごとの収支</h2>
+    <div class="card">
+      <table class="small">
+        <tr><th>月</th><th class="r">収入</th><th class="r">支出</th><th class="r">差引</th></tr>
+        ${x.monthly.map((m) => `<tr><td>${esc(ym(m.month))}</td><td class="r num">${yen(m.income)}</td><td class="r num">${yen(m.expense)}</td><td class="r num"><b>${yen(m.net)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="muted">まだ記録がありません</td></tr>'}
+      </table>
+      ${own ? '' : `<div class="small muted">${esc(x.company)}の計算どおり（収入＝入金額、支出＝管理料＋費用）。<a href="#/money">収支・送金へ</a></div>`}
+    </div>
+    ${own ? `
+      <h2>収入・支出を記録</h2>
+      <form id="lf" class="card">
+        <div class="row2">
+          <label>年月<input type="month" id="l-month" required></label>
+          <label>区分<select id="l-type"><option value="income">収入</option><option value="expense">支出</option></select></label>
+          <label>項目<input type="text" id="l-cat" placeholder="賃料・修繕・清掃など" required></label>
+          <label>金額<span class="unit"><input type="text" id="l-amount" inputmode="numeric" required><i>円</i></span></label>
+        </div>
+        <div class="err" id="l-err"></div>
+        <button class="btn">記録する</button>
+        <label style="margin-top:12px">または、収支のCSVを読み込む<input type="file" id="l-csv" accept=".csv,.txt,text/csv"></label>
+        <div id="l-res"></div>
+      </form>
+      ${x.ledger.length ? `<div class="card"><table class="small">${x.ledger.map((e) => `<tr><td>${esc(ym(e.month))}</td><td>${esc(e.category)}${e.room ? ` <span class="muted">${esc(e.room)}</span>` : ''}${e.source === 'import' ? ' <span class="muted">📄</span>' : ''}</td><td class="r num ${e.type === 'expense' ? 'neg' : ''}">${e.type === 'expense' ? '−' : ''}${yen(e.amount)}</td><td class="r"><button class="x" data-del="${esc(e.id)}" aria-label="削除">×</button></td></tr>`).join('')}</table></div>` : ''}` : ''}
+
+    <h2>取得・借入・税・保険</h2>
+    <form id="ff" class="card">
+      ${financeFields(x.finance)}
+      <div class="small muted">オーナーご自身の情報です。管理会社には送りません。</div>
+      <button class="btn sub">保存する</button>
+    </form>
+
+    ${x.works.length ? `<h2>工事</h2><div class="card">${x.works.map((w) => `<div class="row small"><span>${esc(w.title)}</span><span class="pill info">${esc(w.status)}</span></div>`).join('')}<a class="small" href="#/works">工事の詳しい様子 ›</a></div>` : ''}
+    ${own ? '<button class="btn danger" id="del">この資産を削除する</button>' : `<p class="small muted">この建物は${esc(x.company)}（${esc(x.system)}）から届いています。<a href="#/menu/companies">管理会社</a></p>`}`;
+
+  document.getElementById('ff').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api(`/assets/${enc(id)}`, { method: 'PATCH', body: { finance: readFinance() } }); toast('保存しました'); viewAsset(id); } catch (ex) { toast(ex.message); }
+  };
+  if (!own) return;
+  document.getElementById('lf').onsubmit = async (e) => {
+    e.preventDefault();
+    const v = (i) => document.getElementById(i).value;
+    try {
+      await api(`/assets/${enc(id)}/ledger`, { method: 'POST', body: { month: v('l-month'), type: v('l-type'), category: v('l-cat'), amount: v('l-amount') } });
+      toast('記録しました'); viewAsset(id);
+    } catch (ex) { document.getElementById('l-err').textContent = ex.message; }
+  };
+  document.getElementById('l-csv').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = detect(parseCSV(decode(await f.arrayBuffer())));
+    const res = document.getElementById('l-res');
+    if (r.kind !== 'ledger' || !r.items.length) { res.innerHTML = `<p class="err">${esc(r.errors[0] || '収支の資料として読めませんでした')}</p>`; return; }
+    if (!confirm(`${r.items.length}件（${[...new Set(r.items.map((i) => ym(i.month)))].join('・')}）を取り込みます。よろしいですか？${r.errors.length ? `\n読めなかった行：${r.errors.length}件` : ''}`)) return;
+    try { await api(`/assets/${enc(id)}/ledger`, { method: 'POST', body: { source: 'import', entries: r.items } }); toast(`${r.items.length}件を取り込みました`); viewAsset(id); } catch (ex) { res.innerHTML = `<p class="err">${esc(ex.message)}</p>`; }
+  };
+  $app.querySelectorAll('[data-del]').forEach((b) => {
+    b.onclick = async () => { if (!confirm('この記録を削除しますか？')) return; await api(`/assets/${enc(id)}/ledger/${enc(b.dataset.del)}`, { method: 'DELETE' }); viewAsset(id); };
+  });
+  document.getElementById('del').onclick = async () => {
+    if (!confirm(`「${x.name}」と、その収支の記録を削除します。よろしいですか？`)) return;
+    await api(`/assets/${enc(id)}`, { method: 'DELETE' });
+    toast('削除しました'); location.hash = '#/assets';
+  };
+}
+let closedLatest = '';
+const seedClosedLabel = () => closedLatest;
+
 
 // ---------- ルーティング ----------
 
@@ -391,14 +690,19 @@ async function route() {
   document.getElementById('bell').hidden = !loggedIn;
   if (!loggedIn) { if (page !== 'login') { location.hash = '#/login'; return; } return viewLogin(); }
   if (page === 'login') { location.hash = '#/home'; return; }
-  const tab = ['reports', 'notices'].includes(page) ? 'menu' : page;
+  const tab = ['reports', 'notices', 'works'].includes(page) ? 'menu' : page;
   document.querySelectorAll('nav.tabs a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
   try {
-    if (!me) { me = await api('/me'); setHeader(); }
+    if (!me) { me = await api('/me'); setHeader(); closedLatest = (await api('/months')).closed.slice(-1)[0]; }
     if (page === 'proposals') await (a1 && a2 ? viewProposal(a1, a2) : viewProposals());
     else if (page === 'money') await viewMoney(a1);
     else if (page === 'reports') await (a1 && a2 ? viewReport(a1, a2) : viewReports());
     else if (page === 'works') await viewWorks();
+    else if (page === 'assets') {
+      if (a1 === 'new') await (a2 ? viewAssetForm(a2 === 'import' ? 'import' : 'self') : viewAssetNew());
+      else if (a1) await (a2 === 'edit' ? viewAssetForm('edit', a1) : viewAsset(a1));
+      else await viewAssets();
+    }
     else if (page === 'notices') await viewNotices();
     else if (page === 'menu') viewMenu(a1);
     else await viewHome();

@@ -36,6 +36,118 @@ export function createStore() {
   const ownerTenant = (ownerId) => (ownerRec(ownerId) || {}).tenantId;
   const company = (tenantId) => ({ tenantId, company: (tenantOf(tenantId) || {}).company || '' });
 
+  // ---------- 資産（建物）----------
+  // 3つの作り方：管理システムと連携（link）／管理会社の資料から（import）／自主管理で入力（self）
+  const FIN_KEYS = ['price', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance'];
+  const STATUSES = ['入居中', '空室'];
+  const str = (v, max = 60) => String(v ?? '').trim().slice(0, max);
+  const int = (v) => { const n = Math.round(Number(String(v ?? '').replace(/[,円¥\s]/g, ''))); return Number.isFinite(n) && n >= 0 ? n : 0; };
+  const ymOk = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
+
+  function cleanFinance(f = {}) {
+    const out = {};
+    for (const k of FIN_KEYS) out[k] = k === 'loanRate' ? Math.max(0, Math.min(30, Number(f[k]) || 0)) : int(f[k]);
+    out.acquired = ymOk(f.acquired) ? f.acquired : '';
+    return out;
+  }
+  // 部屋：部屋番号・間取り・賃料・共益費・状態だけを持つ（入居者の情報は受け取らない）
+  function cleanRooms(rooms) {
+    if (!Array.isArray(rooms)) return [];
+    return rooms.slice(0, 500).map((r) => ({
+      no: str(r.no, 20), layout: str(r.layout, 20), rent: int(r.rent), fee: int(r.fee),
+      status: STATUSES.includes(r.status) ? r.status : '入居中',
+    })).filter((r) => r.no);
+  }
+  function seedOwnerDemo(a, ownerId) {
+    const d = seed.ownerDemo[ownerId];
+    if (!d) return;
+    for (const [bid, f] of Object.entries(d.finance || {})) a.finance[bid] = cleanFinance(f);
+    for (const x of d.assets || []) {
+      const as = newAsset(x);
+      a.assets.push(as);
+      for (const [month, type, category, amount] of x.ledger || []) a.ledger.push({ id: `LG-${seq++}`, assetId: as.id, month, type, category, amount, source: x.source });
+    }
+  }
+  function newAsset(b) {
+    const source = b.source === 'import' ? 'import' : 'self';
+    const name = str(b.name);
+    if (!name) throw new HttpError(400, 'name_required', '物件名を入力してください');
+    return {
+      id: `AS-${seq++}`, source, company: source === 'import' ? str(b.company) : '',
+      name, address: str(b.address, 120), structure: str(b.structure, 10), floors: int(b.floors) || null,
+      built: ymOk(b.built) ? b.built : '', rooms: cleanRooms(b.rooms), finance: cleanFinance(b.finance),
+    };
+  }
+
+  const latestClosed = () => seed.closed[seed.closed.length - 1];
+
+  function kpi(rooms, finance, annualCost) {
+    const units = rooms.length;
+    const occupied = rooms.filter((r) => r.status !== '空室').length;
+    const fullYear = rooms.reduce((s, r) => s + (r.rent + r.fee) * 12, 0);
+    const curYear = rooms.filter((r) => r.status !== '空室').reduce((s, r) => s + (r.rent + r.fee) * 12, 0);
+    const price = finance.price || 0;
+    const cost = annualCost + (finance.propertyTax || 0) + (finance.insurance || 0);
+    return {
+      units, occupied, occRate: units ? occupied / units : 0, fullYear, curYear, annualCost: cost,
+      grossYield: price ? fullYear / price : null,
+      netYield: price ? (curYear - cost) / price : null,
+      loanYear: (finance.loanMonthly || 0) * 12,
+    };
+  }
+
+  // 管理システムとつながっている建物（基本情報・部屋・収支は管理会社のデータ。取得価格などはオーナーが追加）
+  function linkAssets(a) {
+    const out = [];
+    for (const l of a.links) {
+      const t = tenantOf(l.tenantId);
+      for (const b of db.buildings.filter((x) => x.ownerId === l.ownerId)) {
+        const m = latestClosed();
+        const pl = seed.buildPL(l.ownerId, m).buildings.find((x) => x.buildingId === b.id);
+        const rooms = seed.units.filter((u) => u.buildingId === b.id).map((u) => {
+          const st = pl.rooms.find((r) => r.no === u.no).status;
+          return { no: u.no, layout: '', rent: u.rent, fee: u.fee, status: st === '空室' ? '空室' : '入居中' };
+        });
+        // 年間の運営費（見込み）：締め済みの月の管理料＋費用の平均 × 12
+        const months = seed.closed.map((cm) => seed.buildPL(l.ownerId, cm).buildings.find((x) => x.buildingId === b.id));
+        const avg = months.reduce((s, x) => s + x.fee + x.expense, 0) / months.length;
+        const finance = a.finance[b.id] || cleanFinance();
+        out.push({
+          id: `L.${l.tenantId}.${b.id}`, source: 'link', system: t.system, tenantId: l.tenantId, company: t.company, buildingId: b.id,
+          name: b.name, address: b.address, structure: b.structure, floors: b.floors, built: b.built,
+          rooms, finance, kpi: kpi(rooms, finance, Math.round(avg * 12)),
+        });
+      }
+    }
+    return out;
+  }
+  function ownAssetView(a, as) {
+    // 年間の運営費（見込み）：入力された支出の月平均 × 12
+    const exp = a.ledger.filter((e) => e.assetId === as.id && e.type === 'expense');
+    const months = new Set(a.ledger.filter((e) => e.assetId === as.id).map((e) => e.month));
+    const avg = months.size ? exp.reduce((s, e) => s + e.amount, 0) / months.size : 0;
+    return { ...as, kpi: kpi(as.rooms, as.finance, Math.round(avg * 12)) };
+  }
+  function allAssets(accountId) {
+    const a = account(accountId);
+    return [...linkAssets(a), ...a.assets.map((as) => ownAssetView(a, as))];
+  }
+  function findOwn(a, id) {
+    const as = a.assets.find((x) => x.id === id);
+    if (!as) throw new HttpError(404, 'not_found', '資産が見つかりません');
+    return as;
+  }
+  function cleanEntry(e, source) {
+    const month = String(e.month || '');
+    if (!ymOk(month)) throw new HttpError(400, 'bad_month', '年月の形式が正しくありません（例：2026-10）');
+    if (!['income', 'expense'].includes(e.type)) throw new HttpError(400, 'bad_type', '収入か支出を選んでください');
+    const category = str(e.category, 30);
+    if (!category) throw new HttpError(400, 'category_required', '項目を入力してください');
+    const amount = int(e.amount);
+    if (!amount) throw new HttpError(400, 'amount_required', '金額を入力してください');
+    return { id: `LG-${seq++}`, month, type: e.type, category, amount, room: str(e.room, 20), source };
+  }
+
   function account(accountId) {
     const a = db.accounts.find((x) => x.id === accountId);
     if (!a) throw new HttpError(401, 'unauthorized', 'ログインしてください');
@@ -72,6 +184,7 @@ export function createStore() {
   return {
     db,
     app: () => db.app,
+    systems: () => [...new Set(db.tenants.map((t) => t.system))],
 
     // 招待コードでログイン（初回はアカウントを作る）。すでにつながっている会社のコードなら、そのアカウントに入る
     login(code) {
@@ -79,7 +192,8 @@ export function createStore() {
       if (!inv) throw new HttpError(401, 'invalid_code', '招待コードが正しくありません');
       let a = db.accounts.find((x) => x.links.some((l) => l.tenantId === inv.tenantId && l.ownerId === inv.ownerId));
       if (!a) {
-        a = { id: `ACC-${seq++}`, name: ownerRec(inv.ownerId).name, links: [{ ...inv }] };
+        a = { id: `ACC-${seq++}`, name: ownerRec(inv.ownerId).name, links: [{ ...inv }], assets: [], finance: {}, ledger: [] };
+        seedOwnerDemo(a, inv.ownerId);
         db.accounts.push(a);
       }
       return a;
@@ -103,7 +217,7 @@ export function createStore() {
         links: a.links.map((l) => {
           const t = tenantOf(l.tenantId);
           return {
-            tenantId: l.tenantId, ownerId: l.ownerId, company: t.company, tel: t.tel,
+            tenantId: l.tenantId, ownerId: l.ownerId, company: t.company, tel: t.tel, system: t.system,
             buildings: db.buildings.filter((b) => b.ownerId === l.ownerId).map((b) => ({ ...b, units: seed.units.filter((u) => u.buildingId === b.id).length })),
             mgmt: db.mgmt.filter((m) => m.ownerId === l.ownerId),
           };
@@ -124,6 +238,7 @@ export function createStore() {
         month, closed: ok.length === per.length && per.length > 0,
         total: ok.length ? { billed: sum('billed'), received: sum('received'), unpaid: sum('unpaid'), fee: sum('fee'), expense: sum('expense'), remit: sum('remit'), occupied: sum('occupied'), units: sum('units') } : null,
         companies: per,
+        own: this.ownMonth(accountId, month), // 自主管理・資料から作った資産（月締めはない）
       };
     },
 
@@ -282,6 +397,105 @@ export function createStore() {
           throw new HttpError(400, 'unknown_event', `未対応のイベントです：${ev.type}`);
       }
       return { ok: true };
+    },
+
+    assets(accountId) {
+      const list = allAssets(accountId);
+      const sum = (f) => list.reduce((s, x) => s + f(x), 0);
+      const price = sum((x) => x.finance.price || 0);
+      const units = sum((x) => x.kpi.units);
+      return {
+        summary: {
+          count: list.length, price, loanBalance: sum((x) => x.finance.loanBalance || 0),
+          fullYear: sum((x) => x.kpi.fullYear), curYear: sum((x) => x.kpi.curYear),
+          units, occupied: sum((x) => x.kpi.occupied), occRate: units ? sum((x) => x.kpi.occupied) / units : 0,
+          // 利回りは取得価格が入っている資産だけで出す
+          grossYield: (() => { const w = list.filter((x) => x.finance.price); const p = w.reduce((s, x) => s + x.finance.price, 0); return p ? w.reduce((s, x) => s + x.kpi.fullYear, 0) / p : null; })(),
+          missingPrice: list.filter((x) => !x.finance.price).length,
+        },
+        list,
+      };
+    },
+
+    asset(accountId, id) {
+      const a = account(accountId);
+      const x = allAssets(accountId).find((v) => v.id === id);
+      if (!x) throw new HttpError(404, 'not_found', '資産が見つかりません');
+      const ledger = x.source === 'link' ? [] : a.ledger.filter((e) => e.assetId === id).sort((p, q) => q.month.localeCompare(p.month));
+      const works = x.source === 'link' ? db.orders.filter((o) => o.buildingId === x.buildingId).map((o) => ({ id: o.id, title: o.title, status: o.status, amount: o.amount })) : [];
+      // 月ごとの収支：連携は管理会社の計算結果、それ以外は入力・取込の記録から
+      const monthly = x.source === 'link'
+        ? seed.closed.map((m) => { const l = a.links.find((v) => v.tenantId === x.tenantId); const b = seed.buildPL(l.ownerId, m).buildings.find((v) => v.buildingId === x.buildingId); return { month: m, income: b.received, expense: b.fee + b.expense, net: b.remit }; })
+        : [...new Set(ledger.map((e) => e.month))].sort().map((m) => {
+          const es = ledger.filter((e) => e.month === m);
+          const income = es.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+          const expense = es.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+          return { month: m, income, expense, net: income - expense };
+        });
+      return { ...x, ledger, works, monthly };
+    },
+
+    createAsset(accountId, body) {
+      const a = account(accountId);
+      if (a.assets.length >= 200) throw new HttpError(400, 'too_many', '登録できる数を超えています');
+      const as = newAsset(body || {});
+      a.assets.push(as);
+      if (Array.isArray(body.ledger)) for (const e of body.ledger.slice(0, 2000)) a.ledger.push({ ...cleanEntry(e, as.source), assetId: as.id });
+      return this.asset(accountId, as.id);
+    },
+
+    // 連携している建物は取得価格などだけ。自分で作った資産は基本情報・部屋も変えられる
+    updateAsset(accountId, id, body) {
+      const a = account(accountId);
+      if (id.startsWith('L.')) {
+        const x = linkAssets(a).find((v) => v.id === id);
+        if (!x) throw new HttpError(404, 'not_found', '資産が見つかりません');
+        if (body.finance) a.finance[x.buildingId] = cleanFinance(body.finance);
+        return this.asset(accountId, id);
+      }
+      const as = findOwn(a, id);
+      const merged = newAsset({ ...as, ...body, source: as.source, finance: body.finance || as.finance, rooms: body.rooms || as.rooms });
+      Object.assign(as, { ...merged, id: as.id });
+      return this.asset(accountId, id);
+    },
+
+    deleteAsset(accountId, id) {
+      const a = account(accountId);
+      findOwn(a, id);
+      a.assets = a.assets.filter((x) => x.id !== id);
+      a.ledger = a.ledger.filter((e) => e.assetId !== id);
+      return { ok: true };
+    },
+
+    addLedger(accountId, id, body) {
+      const a = account(accountId);
+      const as = findOwn(a, id);
+      const items = Array.isArray(body.entries) ? body.entries : [body];
+      if (!items.length || items.length > 2000) throw new HttpError(400, 'bad_entries', '取り込む行がありません');
+      const src = body.source === 'import' ? 'import' : as.source;
+      const clean = items.map((e) => cleanEntry(e, src)); // 1行でも不正なら全部取り込まない
+      for (const e of clean) a.ledger.push({ ...e, assetId: id });
+      return this.asset(accountId, id);
+    },
+
+    deleteLedger(accountId, id, entryId) {
+      const a = account(accountId);
+      findOwn(a, id);
+      const n = a.ledger.length;
+      a.ledger = a.ledger.filter((e) => !(e.assetId === id && e.id === entryId));
+      if (a.ledger.length === n) throw new HttpError(404, 'not_found', '記録が見つかりません');
+      return this.asset(accountId, id);
+    },
+
+    // 自主管理・資料の資産の、その月の収支（オーナー自身の記録）
+    ownMonth(accountId, month) {
+      const a = account(accountId);
+      return a.assets.map((as) => {
+        const es = a.ledger.filter((e) => e.assetId === as.id && e.month === month);
+        const income = es.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0);
+        const expense = es.filter((e) => e.type === 'expense').reduce((s, e) => s + e.amount, 0);
+        return { assetId: as.id, name: as.name, source: as.source, company: as.company, income, expense, net: income - expense, entries: es };
+      }).filter((x) => x.entries.length);
     },
 
     drainOutbox() {
