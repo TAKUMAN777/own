@@ -88,7 +88,7 @@ async function viewHome() {
   const active = works.filter((w) => w.status !== '支払済');
   $app.innerHTML = `
     <h1>${esc(me.name)} 様</h1>
-    ${pending.length ? `<a class="card" href="#/proposals/${esc(pending[0].id)}" style="border-color:var(--warn)">
+    ${pending.length ? `<a class="card attn" href="#/proposals/${esc(pending[0].id)}">
         <div class="row"><strong>ご回答をお待ちしているご提案</strong><span class="pill warn">${pending.length}件</span></div>
         <div class="small">${pending.map((p) => esc(p.title)).join('<br>')}</div></a>`
       : '<div class="card"><strong>ご回答待ちのご提案はありません</strong></div>'}
@@ -98,7 +98,7 @@ async function viewHome() {
       <div class="small muted">入居 ${pl.occupied}／${pl.units}室　${rem ? `送金日 ${esc(ymd(rem.date))}` : ''}</div>
     </a>
     <a class="card" href="#/works">
-      <div class="row"><strong>進行中の工事</strong><span class="pill">${active.length}件</span></div>
+      <div class="row"><strong>進行中の工事</strong><span class="pill info">${active.length}件</span></div>
       ${active.map((w) => `<div class="small">${esc(w.title)}：${esc(w.status)}</div>`).join('') || '<div class="small muted">ありません</div>'}
     </a>
     <h2>物件</h2>
@@ -280,7 +280,7 @@ async function viewWorks() {
   $app.innerHTML = `<h1>工事</h1>${list.map((w) => {
     const idx = w.steps.indexOf(w.status);
     return `<div class="card">
-      <div class="row"><strong>${esc(w.title)}</strong><span class="pill ${w.status === '支払済' ? 'ok' : ''}">${esc(w.status)}</span></div>
+      <div class="row"><strong>${esc(w.title)}</strong><span class="pill ${w.status === '支払済' ? 'ok' : 'info'}">${esc(w.status)}</span></div>
       <div class="small muted">${esc(w.buildingName)}／${esc(w.contractor)}／${yen(w.amount)}</div>
       <ol class="steps">${w.steps.map((s, i) => `<li class="${i <= idx ? 'done' : ''} ${i === idx ? 'cur' : ''}">${esc(s)}</li>`).join('')}</ol>
       ${w.report ? `<p class="small">${esc(w.report)}</p>` : ''}
