@@ -61,12 +61,10 @@ function __api(method, url, headers, raw) {
   const json = () => { try { return raw ? JSON.parse(raw) : {}; } catch { throw Object.assign(new Error('JSONの形式が正しくありません'), { status: 400, code: 'bad_json' }); } };
   const M = method;
   if (M === 'GET' && p === '/app') return { name: __store.app().name, systems: __store.systems(), demo: true };
-  if (M === 'POST' && p === '/auth/invite') {
-    const acc = __store.login(json().code);
-    const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    __sessions.set(token, acc.id);
-    return { token, accountId: acc.id };
-  }
+  const newSession = (acc) => { const token = Math.random().toString(36).slice(2) + Date.now().toString(36); __sessions.set(token, acc.id); return { token, accountId: acc.id }; };
+  if (M === 'POST' && p === '/auth/invite') return newSession(__store.login(json().code));
+  if (M === 'POST' && p === '/auth/start') return newSession(__store.start(json().name));
+  if (M === 'POST' && p === '/auth/demo') return newSession(__store.demo());
   const m = /^Bearer (\\S+)$/.exec(headers.authorization || '');
   const A = m && __sessions.get(m[1]);
   if (!A) throw Object.assign(new Error('ログインしてください'), { status: 401, code: 'unauthorized' });
@@ -110,8 +108,9 @@ window.fetch = async (input, init = {}) => {
   await new Promise((r) => setTimeout(r, 60));
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 };
-// 公開デモは開くたびに初期状態から（前回のログインは使わない）
+// 公開デモは開くたびに初期状態から、ログインの画面を出さずにデモへ入る
 try { localStorage.removeItem('owner-app-session-v2'); } catch { /* noop */ }
+window.__autoDemo = true;
 `;
 
 let html = read('public/index.html');

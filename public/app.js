@@ -93,23 +93,35 @@ function codeForm(id, label) {
 function viewLogin() {
   $app.innerHTML = `
     <div class="hello">ようこそ</div>
-    <p>物件の管理を任せている管理会社から届いた<strong>招待コード</strong>を入力してください。<br>
-      その会社からのご提案・送金・報告書・工事の様子が、このアプリにまとめて届きます。</p>
-    ${codeForm('f', 'はじめる')}
-    <p class="notice">デモ用の招待コード：<strong>HKT-0001</strong>（田中様）／<strong>HKT-0002</strong>（山本様）<br>
-      田中様はログイン後、メニューの「管理会社」で <strong>TNJ-0011</strong> を入れると2社目がつながります。</p>`;
-  document.getElementById('f').onsubmit = async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector('button');
-    btn.disabled = true;
+    <p>建物ごと・管理会社ごと・自主管理の資産を、過去・いま・未来でまとめて見られるアプリです。</p>
+    <button type="button" class="btn hero" id="demo">▶ デモを見る（田中様の例）</button>
+    <form id="st" class="card">
+      <h3>自分の物件で始める</h3>
+      <p class="small muted">招待コードはいりません。自主管理の物件や、管理会社の資料（CSV）から資産を作れます。管理会社とはあとからつなげられます。</p>
+      <label for="st-name">お名前</label>
+      <input id="st-name" type="text" autocomplete="name" placeholder="例：田中 靖夫" required>
+      <div class="err" id="st-err"></div>
+      <button class="btn">はじめる</button>
+    </form>
+    <details class="card">
+      <summary><b>招待コードをお持ちの方</b></summary>
+      <p class="small muted">管理会社から届いたコードで、その会社のご提案・送金・報告書・工事の様子が届きます。</p>
+      ${codeForm('f', 'コードで始める').replace('class="card"', '')}
+      <p class="small muted">デモ用：HKT-0001（田中様）／HKT-0002（山本様）</p>
+    </details>`;
+  const enter = async (path, body, errId, btn) => {
+    if (btn) btn.disabled = true;
     try {
-      const r = await api('/auth/invite', { method: 'POST', body: { code: document.getElementById('f-code').value } });
+      const r = await api(path, { method: 'POST', body });
       session = r; store.set(r);
       location.hash = '#/home';
     } catch (err) {
-      document.getElementById('f-err').textContent = err.message;
-    } finally { btn.disabled = false; }
+      if (errId) document.getElementById(errId).textContent = err.message; else toast(err.message);
+    } finally { if (btn) btn.disabled = false; }
   };
+  document.getElementById('demo').onclick = (e) => enter('/auth/demo', {}, null, e.currentTarget);
+  document.getElementById('st').onsubmit = (e) => { e.preventDefault(); enter('/auth/start', { name: document.getElementById('st-name').value }, 'st-err', e.target.querySelector('button')); };
+  document.getElementById('f').onsubmit = (e) => { e.preventDefault(); enter('/auth/invite', { code: document.getElementById('f-code').value }, 'f-err', e.target.querySelector('button')); };
 }
 
 async function viewHome() {
@@ -122,6 +134,18 @@ async function viewHome() {
   const monthRems = rems.filter((r) => r.month === last);
   const active = works.filter((w) => w.status !== '支払済');
   const chip = (href, ic, label, n, unit = '') => `<a class="chip" href="${href}"><span class="ic">${ic}</span>${label}<b>${n}</b>${unit ? `<small>${unit}</small>` : ''}</a>`;
+  if (!as.count && !me.links.length) {
+    const opt = (href, ic, t, sub) => `<a class="menu-item" href="${href}"><span class="ic">${ic}</span><span><b>${t}</b><small>${sub}</small></span><span class="go">›</span></a>`;
+    $app.innerHTML = `
+      <div class="hello">${esc(me.name)} 様、はじめましょう</div>
+      <p class="small">まず、資産（建物）をひとつ登録します。管理のしかたに合わせて選んでください。</p>
+      <div class="menu">
+        ${opt('#/assets/new/self', '✍️', '自主管理で入力する', '物件・部屋・毎月の収入と支出を自分で入力')}
+        ${opt('#/assets/new/import', '📄', '管理会社の資料から作る', '送金明細・部屋一覧のCSVを読み込む（見本でも試せます）')}
+        ${opt('#/menu/companies', '🔗', '管理会社とつなぐ', `招待コードで、${esc(appInfo.systems.join('・'))}から自動で届く`)}
+      </div>`;
+    return;
+  }
   $app.innerHTML = `
     <div class="chips">
       ${chip('#/assets', '🏢', '資産', as.count, '件')}
@@ -132,15 +156,15 @@ async function viewHome() {
     </div>
     ${pending.length
       ? `<a class="btn hero" href="#/proposals/${enc(pending[0].tenantId)}/${enc(pending[0].id)}">▶ ご提案に回答する（${pending.length}件）</a>`
-      : `<a class="btn hero" href="#/reports">📄 ${Number(last.slice(5))}月の月次報告書を見る</a>`}
+      : me.links.length ? `<a class="btn hero" href="#/reports">📄 ${Number(last.slice(5))}月の月次報告書を見る</a>` : '<a class="btn hero" href="#/assets">🏢 資産を見る</a>'}
     ${pending.map((p) => `<a class="card attn" href="#/proposals/${enc(p.tenantId)}/${enc(p.id)}">
         <div class="row"><strong>${esc(p.title)}</strong><span class="pill warn">ご回答待ち</span></div>
         <div class="small muted">${co(p)} ${esc(md(p.sentAt))}・${p.quotes.length}案からお選びください</div></a>`).join('')}
-    <a class="card" href="#/money/${esc(last)}">
+    ${me.links.length ? `    <a class="card" href="#/money/${esc(last)}">
       <div class="row"><span>💴 ${esc(ym(last))}分 ご送金の合計</span>${monthRems.length ? `<span class="pill ok">${monthRems.length}社 送金済</span>` : ''}</div>
       <div class="big num">${monthRems.length ? yen(monthRems.reduce((s, r) => s + r.amount, 0)) : '—'}</div>
       ${monthRems.map((r) => `<div class="row small"><span>${co(r)}</span><span class="num">${yen(r.amount)}（${esc(md(r.date))}）</span></div>`).join('')}
-    </a>
+    </a>` : ''}
     <a class="card" href="#/assets">
       <div class="row"><strong>🏢 資産</strong><span class="small muted">${as.count}件</span></div>
       <div class="kpis">
@@ -862,6 +886,12 @@ async function start() {
   appInfo = await api('/app');
   document.title = appInfo.name;
   setHeader();
+  // 公開デモ：ログインの画面を出さずに、デモ（田中様の例）へ入る
+  if (!session && window.__autoDemo) {
+    session = await api('/auth/demo', { method: 'POST' });
+    store.set(session);
+    if (!location.hash || location.hash === '#/login') location.hash = '#/home';
+  }
   window.addEventListener('hashchange', route);
   route();
 }

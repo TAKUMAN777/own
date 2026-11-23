@@ -21,6 +21,8 @@
 |---|---|
 | `GET /app` | `{ name, systems, demo }` アプリ名（設定値）と、連携できる管理システムの名前 |
 | `POST /auth/invite` | `{ code }` → `{ token, accountId }`。初回はアカウントを作る。つながっている会社のコードなら同じアカウントに入る。5回間違えると1分待ち |
+| `POST /auth/start` | `{ name }` → `{ token, accountId }`。招待コードなしでアカウントを作る（管理会社とはあとからつなぐ） |
+| `POST /auth/demo` | デモ（田中様の例）に入る |
 | `POST /auth/logout` | トークンを無効にする |
 | `GET /me` | `{ name, links: [{ tenantId, company, tel, system, ownerId, buildings, mgmt }] }` |
 | `POST /links` | `{ code }` 管理会社を追加。同じ会社は `409 already_linked`、別アカウントで使用済みは `409 in_use` |

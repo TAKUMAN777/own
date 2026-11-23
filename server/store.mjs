@@ -254,6 +254,26 @@ export function createStore() {
       return a;
     },
 
+    // 招待コードなしで始める（自主管理や資料から。管理会社とはあとでつなげる）
+    start(name) {
+      const n = str(name, 30);
+      if (!n) throw new HttpError(400, 'name_required', 'お名前を入力してください');
+      const a = { id: `ACC-${seq++}`, name: n, links: [], assets: [], finance: {}, ledger: [] };
+      db.accounts.push(a);
+      return a;
+    },
+
+    // デモ：田中様の例（3社とつながった状態）
+    demo() {
+      const a = this.login('HKT-0001');
+      for (const code of ['TNJ-0011', 'MGR-0021']) {
+        const inv = db.invites[code];
+        const used = db.accounts.some((x) => x.links.some((l) => l.ownerId === inv.ownerId));
+        if (!used) a.links.push({ ...inv });
+      }
+      return a;
+    },
+
     // 管理会社を追加（その会社から届いた招待コード）
     addLink(accountId, code) {
       const a = account(accountId);

@@ -321,3 +321,28 @@ test('過去・現在・未来：建物・部屋・全体のタイムライン�
   assert.ok(new Set(all.events.filter((e) => e.assetId).map((e) => e.assetId)).size === list.length);
   assert.equal(all.events.filter((e) => e.kind === 'now').length, 1);
 });
+
+test('招待コードなしで始める・デモを見る', async () => {
+  assert.equal((await call('/auth/start', { method: 'POST', body: { name: '  ' } })).status, 400);
+  const st = await call('/auth/start', { method: 'POST', body: { name: '佐藤 花子' } });
+  assert.equal(st.status, 200);
+  const t = st.body.token;
+  const me = (await call('/me', { token: t })).body;
+  assert.equal(me.name, '佐藤 花子');
+  assert.deepEqual(me.links, []);
+  const as = (await call('/assets', { token: t })).body;
+  assert.equal(as.summary.count, 0);
+  // 管理会社なしでも各画面のデータは返る
+  for (const path of ['/proposals', '/remittances', '/reports', '/works', '/notifications', '/timeline', '/pl?month=2026-10']) {
+    assert.equal((await call(path, { token: t })).status, 200, path);
+  }
+  // 自主管理の資産を作れる
+  assert.equal((await call('/assets', { token: t, method: 'POST', body: { source: 'self', name: '佐藤アパート', rooms: [{ no: '1', rent: 50000 }] } })).status, 200);
+  // デモ：田中様の例。何度押しても同じアカウント
+  const d1 = (await call('/auth/demo', { method: 'POST' })).body;
+  const d2 = (await call('/auth/demo', { method: 'POST' })).body;
+  assert.equal(d1.accountId, d2.accountId);
+  const dm = (await call('/me', { token: d1.token })).body;
+  assert.equal(dm.name, '田中 靖夫');
+  assert.ok(dm.links.length >= 1);
+});

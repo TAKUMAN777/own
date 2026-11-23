@@ -51,6 +51,12 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) throw new HttpError(401, 'bad_signature', '署名が正しくありません');
   }
 
+  function newSession(acc) {
+    const token = crypto.randomBytes(24).toString('base64url');
+    sessions.set(token, { accountId: acc.id, exp: Date.now() + SESSION_MS });
+    return { token, accountId: acc.id };
+  }
+
   async function api(req, res, url) {
     const p = url.pathname.replace(/^\/api\/v1/, '');
     const seg = p.split('/').filter(Boolean).map(decodeURIComponent);
@@ -70,10 +76,10 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
         throw e;
       }
       attempts.delete(ip);
-      const token = crypto.randomBytes(24).toString('base64url');
-      sessions.set(token, { accountId: acc.id, exp: Date.now() + SESSION_MS });
-      return send(res, 200, { token, accountId: acc.id });
+      return send(res, 200, newSession(acc));
     }
+    if (M === 'POST' && p === '/auth/start') return send(res, 200, newSession(store.start((await readBody(req)).json().name)));
+    if (M === 'POST' && p === '/auth/demo') return send(res, 200, newSession(store.demo()));
 
     if (M === 'POST' && p === '/auth/logout') {
       const s = auth(req);
