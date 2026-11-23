@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap">
+<style>
+  :root { --navy: #233746; --accent: #e07b24; --bg: #f3efe8; --ink: #1f2933; --muted: #6b7680; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; }
+  body { font-family: "Noto Sans JP", sans-serif; background: var(--bg); color: var(--ink); position: relative; }
+  .bgdeco { position: absolute; inset: 0; background:
+    radial-gradient(circle at 85% 15%, rgba(224,123,36,.12) 0 180px, transparent 181px),
+    radial-gradient(circle at 70% 95%, rgba(47,93,138,.10) 0 220px, transparent 221px); }
+  .left { position: absolute; left: 70px; top: 0; bottom: 0; width: 600px; display: flex; flex-direction: column; justify-content: center; }
+  .brand { display: flex; align-items: center; gap: 12px; position: absolute; top: 34px; left: 70px; font-weight: 900; font-size: 22px; color: var(--navy); letter-spacing: .04em; }
+  .brand svg { width: 36px; height: 36px; }
+  .kicker { display: inline-block; align-self: flex-start; background: var(--navy); color: #fff; font-weight: 700; font-size: 18px; padding: 4px 14px; border-radius: 999px; margin-bottom: 18px; }
+  .title { font-size: 46px; font-weight: 900; line-height: 1.3; margin: 0 0 16px; letter-spacing: .01em; }
+  .title em { font-style: normal; color: var(--accent); }
+  .sub { font-size: 22px; line-height: 1.7; color: #3b4652; margin: 0; }
+  .points { margin: 22px 0 0; padding: 0; list-style: none; }
+  .points li { font-size: 21px; margin: 10px 0; padding-left: 34px; position: relative; font-weight: 500; }
+  .points li::before { content: ""; position: absolute; left: 0; top: 9px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); }
+  .anim { animation: rise .6s ease-out both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  .phone { position: absolute; right: 150px; top: 24px; width: 362px; height: 672px; border-radius: 46px; background: #111; padding: 12px;
+    box-shadow: 0 30px 60px rgba(30,20,10,.25), 0 0 0 2px #333 inset; }
+  .phone .screen { width: 338px; height: 648px; border-radius: 36px; overflow: hidden; background: #fff; position: relative; }
+  .phone iframe { width: 390px; height: 748px; border: 0; transform: scale(.8667); transform-origin: 0 0; }
+  .progress { position: absolute; left: 0; bottom: 0; height: 6px; background: var(--accent); width: 0; transition: width .5s linear; }
+  .cover { position: absolute; inset: 0; background: var(--navy); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; z-index: 10; transition: opacity .8s; }
+  .cover.hide { opacity: 0; pointer-events: none; }
+  .cover svg { width: 110px; height: 110px; margin-bottom: 22px; }
+  .cover h1 { font-size: 78px; font-weight: 900; letter-spacing: .08em; margin: 0; }
+  .cover p { font-size: 28px; margin: 18px 0 0; color: #e8b27a; font-weight: 700; letter-spacing: .06em; }
+  .cover small { display: block; margin-top: 30px; font-size: 18px; color: #cfdbe5; line-height: 1.8; }
+  .cover .chips { display: flex; gap: 14px; margin-top: 34px; }
+  .cover .chips span { background: rgba(255,255,255,.12); border-radius: 999px; padding: 8px 18px; font-size: 20px; }
+  .note { position: absolute; left: 70px; bottom: 26px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="bgdeco"></div>
+  <div class="brand"><svg viewBox="0 0 40 40"><rect x="5" y="12" width="16" height="24" rx="1.5" fill="#233746"/><rect x="21" y="4" width="14" height="32" rx="1.5" fill="#e07b24"/><g fill="#fff"><rect x="9" y="16" width="3" height="3"/><rect x="14" y="16" width="3" height="3"/><rect x="9" y="22" width="3" height="3"/><rect x="14" y="22" width="3" height="3"/><rect x="25" y="9" width="2.5" height="3"/><rect x="29.5" y="9" width="2.5" height="3"/><rect x="25" y="15" width="2.5" height="3"/><rect x="29.5" y="15" width="2.5" height="3"/></g></svg>REVO ASSET</div>
+  <div class="left" id="cap"></div>
+  <div class="phone"><div class="screen"><iframe id="app" src="about:blank"></iframe></div></div>
+  <div class="note">デモ画面・データはすべて架空です</div>
+  <div class="progress" id="prog"></div>
+  <div class="cover" id="cover"></div>
+<script>
+  const LOGO = '<svg viewBox="0 0 40 40"><rect x="5" y="12" width="16" height="24" rx="1.5" fill="#fff"/><rect x="21" y="4" width="14" height="32" rx="1.5" fill="#e07b24"/><g fill="#233746"><rect x="9" y="16" width="3" height="3"/><rect x="14" y="16" width="3" height="3"/><rect x="9" y="22" width="3" height="3"/><rect x="14" y="22" width="3" height="3"/><rect x="11" y="29" width="4" height="7"/></g><g fill="#fff"><rect x="25" y="9" width="2.5" height="3"/><rect x="29.5" y="9" width="2.5" height="3"/><rect x="25" y="15" width="2.5" height="3"/><rect x="29.5" y="15" width="2.5" height="3"/><rect x="25" y="21" width="2.5" height="3"/><rect x="29.5" y="21" width="2.5" height="3"/></g></svg>';
+  window.scene = ({ kicker, title, sub, points = [] }) => {
+    document.getElementById('cap').innerHTML = `
+      <div class="kicker anim">${kicker}</div>
+      <h2 class="title anim" style="animation-delay:.1s">${title}</h2>
+      ${sub ? `<p class="sub anim" style="animation-delay:.25s">${sub}</p>` : ''}
+      <ul class="points">${points.map((p, i) => `<li class="anim" style="animation-delay:${0.45 + i * 0.35}s">${p}</li>`).join('')}</ul>`;
+  };
+  window.cover = (html) => { const c = document.getElementById('cover'); if (html) { c.innerHTML = html.replace('%LOGO%', LOGO); c.classList.remove('hide'); } else c.classList.add('hide'); };
+  window.progress = (p) => { document.getElementById('prog').style.width = `${p * 100}%`; };
+</script>
+</body>
+</html>
