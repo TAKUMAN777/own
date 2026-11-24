@@ -6,7 +6,10 @@
   "description": "管理会社ブランドのオーナー向けサービス（ホワイトラベル）。依存パッケージなし。",
   "scripts": {
     "start": "node server/server.mjs",
-    "test": "node --test scripts/*.test.mjs"
+    "test": "node --test scripts/*.test.mjs",
+    "fuzz": "node scripts/fuzz/run.mjs"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

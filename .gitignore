@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 video/*.mp4
 dist/
+scripts/fuzz/.out/
+scripts/fuzz/last-report.json

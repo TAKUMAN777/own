@@ -346,3 +346,35 @@ test('招待コードなしで始める・デモを見る', async () => {
   assert.equal(dm.name, '田中 靖夫');
   assert.ok(dm.links.length >= 1);
 });
+
+// ---------- 10000回テストで見つかった不具合の再発防止 ----------
+test('再発防止：壊れた入力でサーバーが落ちない（null の本文・壊れた %xx）', async () => {
+  const t = await login('HKT-0001');
+  assert.equal((await call('/auth/start', { method: 'POST', body: 'null' })).status, 400);
+  assert.equal((await call('/assets/%E0%A4%A', { token: t })).status, 400);
+  const res = await fetch(`${base}/%E0%A4%A`);
+  assert.equal(res.status, 400);
+});
+
+test('再発防止：大きすぎる数字は受け付けない、資産の登録は全部か無しか', async () => {
+  const st = (await call('/auth/start', { method: 'POST', body: { name: '検証' } })).body.token;
+  assert.equal((await call('/assets', { token: st, method: 'POST', body: { source: 'self', name: 'A', rooms: [{ no: '1', rent: 9e20 }] } })).status, 400);
+  assert.equal((await call('/assets', { token: st, method: 'POST', body: { source: 'self', name: 'A', finance: { price: 1e13 } } })).status, 400);
+  assert.equal((await call('/assets', { token: st, method: 'POST', body: { source: 'self', name: 'A', floors: 1e9 } })).status, 400);
+  // 記録が1件でも不正なら、資産も作られない
+  assert.equal((await call('/assets', { token: st, method: 'POST', body: { source: 'import', name: 'B', ledger: [{ month: '2026-10', type: 'income', category: '賃料', amount: 1 }, { month: 'x', type: 'income', category: 'a', amount: 1 }] } })).status, 400);
+  assert.equal((await call('/assets', { token: st })).body.summary.count, 0);
+});
+
+test('再発防止：ローンが50年で終わらないときは完済見込みを出さない', async () => {
+  const ins = await import('../server/insights.mjs');
+  const L = ins.loanPlan({ loanBalance: 333360547, loanRate: 0.44, loanMonthly: 151845 });
+  assert.equal(L.payoff, null);
+  assert.ok(L.warning);
+});
+
+test('再発防止：資料の入金・出金が同じ行にあれば2件、1円未満は読まない', async () => {
+  const { parseCSV, detect } = await import('../public/csv.js');
+  const r = detect(parseCSV('日付,摘要,入金,出金\n2026/10,精算,"299,000","174,000"\n2026/10,端数,0.4,\n'));
+  assert.deepEqual(r.items.map((i) => [i.type, i.amount]), [['income', 299000], ['expense', 174000]]);
+});

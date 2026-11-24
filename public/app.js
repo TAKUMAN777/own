@@ -849,7 +849,9 @@ async function refreshBadge() {
 
 async function route() {
   navSeq++;
-  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
+  // 壊れた %xx が入っていても止まらない（そのままの文字で探して「見つかりません」を出す）
+  const dec = (x) => { try { return decodeURIComponent(x); } catch { return x; } };
+  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(dec);
   const [page = 'home', a1, a2, a3] = parts;
   const loggedIn = !!session;
   document.getElementById('tabs').hidden = !loggedIn;

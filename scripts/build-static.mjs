@@ -56,9 +56,15 @@ function __photo(id) {
 function __api(method, url, headers, raw) {
   const u = new URL(url, location.href);
   const p = u.pathname.replace(/^.*\\/api\\/v1/, '');
-  const seg = p.split('/').filter(Boolean).map(decodeURIComponent);
+  let seg;
+  try { seg = p.split('/').filter(Boolean).map(decodeURIComponent); } catch { throw Object.assign(new Error('URLの形式が正しくありません'), { status: 400, code: 'bad_path' }); }
   const q = (k) => u.searchParams.get(k);
-  const json = () => { try { return raw ? JSON.parse(raw) : {}; } catch { throw Object.assign(new Error('JSONの形式が正しくありません'), { status: 400, code: 'bad_json' }); } };
+  const json = () => {
+    let v;
+    try { v = raw ? JSON.parse(raw) : {}; } catch { v = null; }
+    if (!v || typeof v !== 'object') throw Object.assign(new Error('JSONの形式が正しくありません'), { status: 400, code: 'bad_json' });
+    return v;
+  };
   const M = method;
   if (M === 'GET' && p === '/app') return { name: __store.app().name, systems: __store.systems(), demo: true };
   const newSession = (acc) => { const token = Math.random().toString(36).slice(2) + Date.now().toString(36); __sessions.set(token, acc.id); return { token, accountId: acc.id }; };

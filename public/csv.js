@@ -85,19 +85,23 @@ export function detect(rows) {
         const category = r[cat] || '';
         if (!m && !category) return;
         if (!m) { errors.push(`${line}行目：年月が読めません（${r[month] || '空欄'}）`); return; }
-        let t, a;
+        const room = roomCol >= 0 ? r[roomCol] : '';
+        const add = (t, a) => {
+          const amount = Math.round(Math.abs(a)); // 1円未満は記録しない
+          if (amount > 0 && Number.isSafeInteger(amount)) items.push({ month: m, type: t, category: category.slice(0, 30), amount, room });
+          else if (amount > 0) errors.push(`${line}行目：金額が大きすぎます`);
+        };
         if (amount >= 0) {
-          a = num(r[amount]);
+          const a = num(r[amount]);
           if (Number.isNaN(a)) { errors.push(`${line}行目：金額が数字ではありません`); return; }
           const tv = type >= 0 ? r[type] : '';
-          t = /支出|出金|費用|経費/.test(tv) ? 'expense' : /収入|入金/.test(tv) ? 'income' : a < 0 ? 'expense' : INCOME.test(category) ? 'income' : 'expense';
-          a = Math.abs(a);
+          add(/支出|出金|費用|経費/.test(tv) ? 'expense' : /収入|入金/.test(tv) ? 'income' : a < 0 ? 'expense' : INCOME.test(category) ? 'income' : 'expense', a);
         } else {
+          // 入金と出金の2列：両方に金額があれば2件として読む
           const iv = num(r[inCol]), ov = num(r[outCol]);
-          if (iv > 0) { t = 'income'; a = iv; } else if (ov > 0) { t = 'expense'; a = ov; } else return;
+          if (iv > 0) add('income', iv);
+          if (ov > 0) add('expense', ov);
         }
-        if (!a) return;
-        items.push({ month: m, type: t, category: category.slice(0, 30), amount: Math.round(a), room: roomCol >= 0 ? r[roomCol] : '' });
       });
       return { kind: 'ledger', items, ignored, errors };
     }

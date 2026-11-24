@@ -42,12 +42,17 @@ export function createStore() {
   const FIN_KEYS = ['price', 'loanBalance', 'loanRate', 'loanMonthly', 'propertyTax', 'insurance', 'capRate', 'appraisal'];
   const STATUSES = ['入居中', '空室'];
   const str = (v, max = 60) => String(v ?? '').trim().slice(0, max);
-  const int = (v) => { const n = Math.round(Number(String(v ?? '').replace(/[,円¥\s]/g, ''))); return Number.isFinite(n) && n >= 0 ? n : 0; };
+  // 数字：読めない・マイナスは0、上限を超えたら受け付けない（合計が正しく計算できる範囲に収める）
+  const int = (v, max = 1e12, label = '数字') => {
+    const n = Math.round(Number(String(v ?? '').replace(/[,円¥\s]/g, '')));
+    if (n === Infinity || (Number.isFinite(n) && n > max)) throw new HttpError(400, 'too_large', `${label}が大きすぎます（上限 ${max.toLocaleString('ja-JP')}）`);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
   const ymOk = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m);
 
   function cleanFinance(f = {}) {
     const out = {};
-    for (const k of FIN_KEYS) out[k] = k === 'loanRate' || k === 'capRate' ? Math.max(0, Math.min(30, Number(f[k]) || 0)) : int(f[k]);
+    for (const k of FIN_KEYS) out[k] = k === 'loanRate' || k === 'capRate' ? Math.max(0, Math.min(30, Number(f[k]) || 0)) : int(f[k], 1e12, '金額');
     out.acquired = ymOk(f.acquired) ? f.acquired : '';
     return out;
   }
@@ -55,7 +60,7 @@ export function createStore() {
   function cleanRooms(rooms) {
     if (!Array.isArray(rooms)) return [];
     return rooms.slice(0, 500).map((r) => ({
-      no: str(r.no, 20), layout: str(r.layout, 20), rent: int(r.rent), fee: int(r.fee),
+      no: str(r.no, 20), layout: str(r.layout, 20), rent: int(r.rent, 1e8, '賃料'), fee: int(r.fee, 1e8, '共益費'),
       status: STATUSES.includes(r.status) ? r.status : '入居中',
     })).filter((r) => r.no);
   }
@@ -75,7 +80,7 @@ export function createStore() {
     if (!name) throw new HttpError(400, 'name_required', '物件名を入力してください');
     return {
       id: `AS-${seq++}`, source, company: source === 'import' ? str(b.company) : '',
-      name, address: str(b.address, 120), structure: str(b.structure, 10), floors: int(b.floors) || null,
+      name, address: str(b.address, 120), structure: str(b.structure, 10), floors: int(b.floors, 200, '階数') || null,
       built: ymOk(b.built) ? b.built : '', rooms: cleanRooms(b.rooms), finance: cleanFinance(b.finance),
     };
   }
@@ -198,7 +203,7 @@ export function createStore() {
     if (!['income', 'expense'].includes(e.type)) throw new HttpError(400, 'bad_type', '収入か支出を選んでください');
     const category = str(e.category, 30);
     if (!category) throw new HttpError(400, 'category_required', '項目を入力してください');
-    const amount = int(e.amount);
+    const amount = int(e.amount, 1e11, '金額');
     if (!amount) throw new HttpError(400, 'amount_required', '金額を入力してください');
     return { id: `LG-${seq++}`, month, type: e.type, category, amount, room: str(e.room, 20), source };
   }
@@ -533,8 +538,10 @@ export function createStore() {
       const a = account(accountId);
       if (a.assets.length >= 200) throw new HttpError(400, 'too_many', '登録できる数を超えています');
       const as = newAsset(body || {});
+      // 収支の記録も先に全部確かめる（1件でも不正なら、資産も作らない）
+      const entries = Array.isArray(body.ledger) ? body.ledger.slice(0, 2000).map((e) => ({ ...cleanEntry(e, as.source), assetId: as.id })) : [];
       a.assets.push(as);
-      if (Array.isArray(body.ledger)) for (const e of body.ledger.slice(0, 2000)) a.ledger.push({ ...cleanEntry(e, as.source), assetId: as.id });
+      a.ledger.push(...entries);
       return this.asset(accountId, as.id);
     },
 

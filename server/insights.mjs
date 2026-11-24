@@ -43,6 +43,7 @@ export function loanPlan(f) {
     n++;
     if (n % 12 === 0 || bal === 0) schedule.push({ month: addMonths(NOW, n), balance: Math.round(bal) });
   }
+  if (bal > 0) return { payoff: null, months: null, schedule, warning: '50年で返し終わらない計算です' };
   return { payoff: addMonths(NOW, n), months: n, schedule };
 }
 

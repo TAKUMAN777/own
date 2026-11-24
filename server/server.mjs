@@ -28,11 +28,19 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
     let size = 0;
     for await (const c of req) {
       size += c.length;
-      if (size > 2 * 1024 * 1024) throw new HttpError(413, 'too_large', 'データが大きすぎます');
-      chunks.push(c);
+      if (size <= 2 * 1024 * 1024) chunks.push(c); // 大きすぎる分は読み捨てて、最後まで受けてから断る
     }
+    if (size > 2 * 1024 * 1024) throw new HttpError(413, 'too_large', 'データが大きすぎます');
     const raw = Buffer.concat(chunks).toString('utf8');
-    return { raw, json: () => { try { return raw ? JSON.parse(raw) : {}; } catch { throw new HttpError(400, 'bad_json', 'JSONの形式が正しくありません'); } } };
+    return {
+      raw,
+      json: () => {
+        let v;
+        try { v = raw ? JSON.parse(raw) : {}; } catch { throw new HttpError(400, 'bad_json', 'JSONの形式が正しくありません'); }
+        if (!v || typeof v !== 'object') throw new HttpError(400, 'bad_json', 'JSONの形式が正しくありません');
+        return v;
+      },
+    };
   }
 
   function auth(req) {
@@ -59,7 +67,8 @@ export function createServer({ webhookSecret = process.env.WEBHOOK_SECRET || 'de
 
   async function api(req, res, url) {
     const p = url.pathname.replace(/^\/api\/v1/, '');
-    const seg = p.split('/').filter(Boolean).map(decodeURIComponent);
+    let seg;
+    try { seg = p.split('/').filter(Boolean).map(decodeURIComponent); } catch { throw new HttpError(400, 'bad_path', 'URLの形式が正しくありません'); }
     const M = req.method;
 
     if (M === 'GET' && p === '/app') return send(res, 200, { name: store.app().name, systems: store.systems(), demo: true });
@@ -156,7 +165,8 @@ ${[120, 260, 400, 540].map((x) => `<circle cx="${x}" cy="90" r="22" fill="${befo
   }
 
   async function staticFile(req, res, url) {
-    let rel = decodeURIComponent(url.pathname);
+    let rel;
+    try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end(); }
     if (rel === '/') rel = '/index.html';
     const file = path.join(ROOT, rel);
     if (!file.startsWith(ROOT + path.sep)) { res.writeHead(403); return res.end(); }
